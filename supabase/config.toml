@@ -1,0 +1,4 @@
+# Minimal config so `supabase functions deploy` keeps the cron-triggered worker public.
+# The worker authenticates itself (x-cron-secret header or a logged-in active user).
+[functions.process-queue]
+verify_jwt = false
