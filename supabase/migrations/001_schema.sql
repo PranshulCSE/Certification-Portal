@@ -70,7 +70,7 @@ create unique index if not exists uq_recipients_event_email
 
 create table if not exists public.certificates (
   id uuid primary key default gen_random_uuid(),
-  event_id uuid references public.events(id) on delete set null,
+  event_id uuid references public.events(id) on delete cascade,
   recipient_id uuid references public.recipients(id) on delete set null,
   verification_code text not null unique
     check (verification_code ~ '^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$'),
@@ -93,6 +93,9 @@ create table if not exists public.certificates (
 );
 create index if not exists idx_certificates_event on public.certificates (event_id);
 create index if not exists idx_certificates_recipient on public.certificates (recipient_id);
+create unique index if not exists uq_certificates_event_recipient
+  on public.certificates (event_id, recipient_id)
+  where recipient_id is not null and status = 'issued';
 
 create table if not exists public.email_jobs (
   id uuid primary key default gen_random_uuid(),
@@ -116,6 +119,7 @@ create table if not exists public.email_jobs (
 );
 create index if not exists idx_email_jobs_queue on public.email_jobs (status, scheduled_at);
 create index if not exists idx_email_jobs_event on public.email_jobs (event_id);
+create index if not exists idx_email_jobs_event_status on public.email_jobs (event_id, status);
 create index if not exists idx_email_jobs_sent_at on public.email_jobs (sent_at) where status = 'sent';
 -- Only one active job per certificate (prevents double-queueing).
 create unique index if not exists uq_email_jobs_active
@@ -147,6 +151,7 @@ create table if not exists public.verify_failures (
   at timestamptz not null default now()
 );
 create index if not exists idx_verify_failures on public.verify_failures (ip, at);
+create index if not exists idx_verify_failures_at on public.verify_failures (at);
 
 -- -----------------------------------------------------------------------------
 -- 2. HELPER FUNCTIONS (used by RLS)
@@ -306,8 +311,17 @@ begin
   return n;
 end $$;
 
+-- Returns PDF storage paths for an event without deleting DB records yet,
+-- allowing the client to safely remove the files from storage first.
+create or replace function public.get_event_pdf_paths(p_event uuid)
+returns text[] language plpgsql security definer set search_path = public as $$
+begin
+  if not public.can_write_event(p_event) then raise exception 'Not allowed'; end if;
+  return coalesce((select array_agg(pdf_path) from public.certificates where event_id = p_event and pdf_path is not null), '{}');
+end $$;
+
 -- Deletes participant emails + generated PDFs. The certificate record (name, event, issuer, code)
--- stays so the public verify page keeps working. Returns PDF storage paths for the client to remove.
+-- stays so the public verify page keeps working. Returns PDF storage paths for the client to verify removal.
 create or replace function public.purge_event_data(p_event uuid)
 returns text[] language plpgsql security definer set search_path = public as $$
 declare paths text[]; v_name text;
@@ -352,13 +366,29 @@ end $$;
 create or replace function public.events_overview()
 returns table (event_id uuid, recipients bigint, certificates bigint, sent bigint, failed bigint, queued bigint)
 language sql stable security invoker set search_path = public as $$
-  select e.id,
-    (select count(*) from public.recipients r where r.event_id = e.id),
-    (select count(*) from public.certificates c where c.event_id = e.id),
-    (select count(*) from public.email_jobs j where j.event_id = e.id and j.status = 'sent'),
-    (select count(*) from public.email_jobs j where j.event_id = e.id and j.status in ('failed', 'bounced')),
-    (select count(*) from public.email_jobs j where j.event_id = e.id and j.status in ('queued', 'sending'))
-  from public.events e;
+  select
+    e.id,
+    coalesce(r.cnt, 0)::bigint as recipients,
+    coalesce(c.cnt, 0)::bigint as certificates,
+    coalesce(j.sent_cnt, 0)::bigint as sent,
+    coalesce(j.failed_cnt, 0)::bigint as failed,
+    coalesce(j.queued_cnt, 0)::bigint as queued
+  from public.events e
+  left join (
+    select event_id, count(*) as cnt from public.recipients group by event_id
+  ) r on r.event_id = e.id
+  left join (
+    select event_id, count(*) as cnt from public.certificates group by event_id
+  ) c on c.event_id = e.id
+  left join (
+    select
+      event_id,
+      count(*) filter (where status = 'sent') as sent_cnt,
+      count(*) filter (where status in ('failed', 'bounced')) as failed_cnt,
+      count(*) filter (where status in ('queued', 'sending')) as queued_cnt
+    from public.email_jobs
+    group by event_id
+  ) j on j.event_id = e.id;
 $$;
 
 create or replace function public.get_send_limits()
@@ -397,25 +427,37 @@ declare
   c public.certificates;
 begin
   begin
-    v_ip := trim(split_part(coalesce((v_hdr::json) ->> 'x-forwarded-for', 'unknown'), ',', 1));
+    v_ip := trim(split_part(coalesce(
+      (v_hdr::json) ->> 'cf-connecting-ip',
+      (v_hdr::json) ->> 'x-real-ip',
+      (v_hdr::json) ->> 'x-forwarded-for',
+      ''
+    ), ',', 1));
   exception when others then
-    v_ip := 'unknown';
+    v_ip := '';
   end;
 
-  select count(*) into v_fail from public.verify_failures where ip = v_ip and at > now() - interval '10 minutes';
-  if v_fail >= 30 then
-    return jsonb_build_object('found', false, 'rate_limited', true);
+  -- Only rate limit if a valid client IP is known. Avoids blocking all users globally if header is absent.
+  if v_ip <> '' and v_ip <> 'unknown' then
+    select count(*) into v_fail from public.verify_failures where ip = v_ip and at > now() - interval '10 minutes';
+    if v_fail >= 30 then
+      return jsonb_build_object('found', false, 'rate_limited', true);
+    end if;
   end if;
 
   if length(v_raw) <> 12 then
-    insert into public.verify_failures (ip) values (v_ip);
+    if v_ip <> '' and v_ip <> 'unknown' then
+      insert into public.verify_failures (ip) values (v_ip);
+    end if;
     return jsonb_build_object('found', false);
   end if;
   v_code := substr(v_raw, 1, 4) || '-' || substr(v_raw, 5, 4) || '-' || substr(v_raw, 9, 4);
 
   select * into c from public.certificates where verification_code = v_code;
   if not found then
-    insert into public.verify_failures (ip) values (v_ip);
+    if v_ip <> '' and v_ip <> 'unknown' then
+      insert into public.verify_failures (ip) values (v_ip);
+    end if;
     if random() < 0.02 then
       delete from public.verify_failures where at < now() - interval '1 day';
     end if;
@@ -539,6 +581,9 @@ drop policy if exists events_update on public.events;
 create policy events_update on public.events for update to authenticated
   using ((owner_id = auth.uid() and public.is_active()) or public.is_admin())
   with check ((owner_id = auth.uid() and public.is_active()) or public.is_admin());
+drop policy if exists events_delete on public.events;
+create policy events_delete on public.events for delete to authenticated
+  using ((owner_id = auth.uid() and public.is_active()) or public.is_admin());
 
 -- event_templates
 drop policy if exists templates_select on public.event_templates;
@@ -599,7 +644,8 @@ begin
     'public.revoke_certificate(uuid,text)', 'public.reinstate_certificate(uuid)',
     'public.reissue_certificate(uuid,text)', 'public.mark_pdfs_ready(uuid[])',
     'public.retry_job(uuid,text)', 'public.retry_failed_jobs(uuid)', 'public.cancel_queued_jobs(uuid)',
-    'public.purge_event_data(uuid)', 'public.event_stats(uuid)', 'public.events_overview()',
+    'public.get_event_pdf_paths(uuid)', 'public.purge_event_data(uuid)',
+    'public.event_stats(uuid)', 'public.events_overview()',
     'public.get_send_limits()', 'public.queue_overview()'
   ] loop
     execute format('revoke all on function %s from public, anon', f);
