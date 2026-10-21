@@ -3,7 +3,7 @@ import { Download, ImagePlus, PenLine, Plus, QrCode, Save, Trash2, Type, Image a
 import { supabase, verifyUrl } from '../../lib/supabase';
 import { audit, uploadAsset } from '../../lib/api';
 import { buildValues, BASE_TOKENS, downloadBlob, normKey, uid } from '../../lib/format';
-import { defaultConfig, FONTS, SAMPLE_VALUES } from '../../lib/defaults';
+import { defaultConfig, DEFAULT_SIZE, FONTS, SAMPLE_VALUES } from '../../lib/defaults';
 import { drawCertificate, ensureFonts, loadTemplateAssets, makeQrImage, prepareBackground, renderPdfBlob, rescaleConfig } from '../../lib/render';
 import { Field, Spinner, useToast } from '../../components/ui';
 
@@ -44,7 +44,13 @@ function Num({ label, value, onChange, step = 1, min }) {
 export default function TemplateDesigner({ ctx }) {
   const { event, template, recipients, reload, ownerName } = ctx;
   const toast = useToast();
-  const [tpl, setTpl] = useState(() => ({ image_path: template.image_path, width: template.width, height: template.height, config: normalize(template.config) }));
+  const initialTpl = template || { image_path: null, width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, config: defaultConfig() };
+  const [tpl, setTpl] = useState(() => ({
+    image_path: initialTpl.image_path || null,
+    width: initialTpl.width || DEFAULT_SIZE.width,
+    height: initialTpl.height || DEFAULT_SIZE.height,
+    config: normalize(initialTpl.config),
+  }));
   const [selected, setSelected] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -55,6 +61,7 @@ export default function TemplateDesigner({ ctx }) {
   const canvasRef = useRef(null);
   const boxesRef = useRef([]);
   const dragRef = useRef(null);
+  const rafRef = useRef(null);
   const drawId = useRef(0);
   const bgInput = useRef(null);
   const logoInput = useRef(null);
@@ -80,7 +87,13 @@ export default function TemplateDesigner({ ctx }) {
   const assetKey = [tpl.image_path, tpl.width, tpl.height, ...cfg.images.map((i) => i.path), ...cfg.signatories.map((s) => s.path)].join('|');
   useEffect(() => {
     let alive = true;
-    loadTemplateAssets(tpl).then((a) => alive && setAssets(a));
+    loadTemplateAssets(tpl).then((a) => {
+      if (!alive) return;
+      setAssets(a);
+      if (a?.failedPaths?.length) {
+        toast.error(`Warning: ${a.failedPaths.length} image asset(s) failed to load.`);
+      }
+    });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetKey]);
@@ -130,9 +143,18 @@ export default function TemplateDesigner({ ctx }) {
     const d = dragRef.current;
     if (!d) return;
     const p = toCanvas(e);
-    patch(d.ref, { x: Math.round(d.ox + p.x - d.sx), y: Math.round(d.oy + p.y - d.sy) });
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      patch(d.ref, { x: Math.round(d.ox + p.x - d.sx), y: Math.round(d.oy + p.y - d.sy) });
+    });
   };
-  const onUp = () => { dragRef.current = null; };
+  const onUp = (e) => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    dragRef.current = null;
+    if (e?.pointerId && canvasRef.current?.releasePointerCapture) {
+      try { canvasRef.current.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+  };
 
   const item = selected ? getItem(cfg, selected) : null;
   const [selType] = selected ? parseRef(selected) : [null];
@@ -176,12 +198,21 @@ export default function TemplateDesigner({ ctx }) {
     try {
       const { blob, width, height, ext } = await prepareBackground(file);
       const path = await uploadAsset(event.id, new File([blob], `bg.${ext}`, { type: blob.type || file.type }), 'bg');
-      setTpl((t) => ({ ...t, image_path: path, width, height, config: rescaleConfig(t.config, t.width, width) }));
+      setTpl((t) => ({ ...t, image_path: path, width, height, config: rescaleConfig(t.config, t.width, width, t.height, height) }));
       setDirty(true);
       toast.ok(`Template image set (${width}×${height}). Check the text positions.`);
     } catch (e) { toast.error(e.message); } finally { setUploading(''); }
   };
-  const useDefaultBg = () => { setTpl((t) => ({ ...t, image_path: null })); setDirty(true); };
+  const useDefaultBg = () => {
+    setTpl((t) => ({
+      ...t,
+      image_path: null,
+      width: DEFAULT_SIZE.width,
+      height: DEFAULT_SIZE.height,
+      config: rescaleConfig(t.config, t.width, DEFAULT_SIZE.width, t.height, DEFAULT_SIZE.height),
+    }));
+    setDirty(true);
+  };
 
   const save = async () => {
     setSaving(true);

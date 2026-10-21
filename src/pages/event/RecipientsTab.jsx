@@ -19,6 +19,8 @@ export default function RecipientsTab({ ctx }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', email: '' });
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const purged = event.status === 'purged';
 
   const certByRecipient = useMemo(() => {
@@ -27,7 +29,8 @@ export default function RecipientsTab({ ctx }) {
     return m;
   }, [certs]);
   const existingEmails = useMemo(() => new Set(recipients.map((r) => (r.email || '').toLowerCase()).filter(Boolean)), [recipients]);
-  const validated = useMemo(() => (table ? validateRows(table.rows, map, existingEmails, { fixCase }) : []), [table, map, existingEmails, fixCase]);
+  const existingNames = useMemo(() => new Set(recipients.map((r) => (r.name || '').toLowerCase()).filter(Boolean)), [recipients]);
+  const validated = useMemo(() => (table ? validateRows(table.rows, map, existingEmails, { fixCase, existingNames }) : []), [table, map, existingEmails, existingNames, fixCase]);
   const okRows = validated.filter((r) => r.status === 'ok');
 
   const loadTable = (t) => { setTable(t); setMap(autoMap(t.headers)); };
@@ -81,7 +84,10 @@ export default function RecipientsTab({ ctx }) {
     reload();
   };
 
-  const shown = recipients.filter((r) => !q || `${r.name} ${r.email || ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 300);
+  const filtered = useMemo(() => recipients.filter((r) => !q || `${r.name} ${r.email || ''}`.toLowerCase().includes(q.toLowerCase())), [recipients, q]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const shown = useMemo(() => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE), [filtered, currentPage]);
   const statusBadge = (s) => ({ ok: ['badge-ok', 'Will import'], error: ['badge-bad', 'Skipped'], duplicate: ['badge-warn', 'Duplicate'] }[s]);
 
   return (
@@ -164,7 +170,32 @@ export default function RecipientsTab({ ctx }) {
                 })}
               </tbody>
             </table>
-            {recipients.length > shown.length && <p className="p-3 text-xs text-slate-500">Showing {shown.length} of {recipients.length}. Use search to find others.</p>}
+            {filtered.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm">
+                <span className="text-xs text-slate-500">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} participants
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span className="flex items-center px-2 text-xs font-semibold text-slate2">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

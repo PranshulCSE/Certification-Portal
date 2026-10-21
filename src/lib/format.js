@@ -12,11 +12,12 @@ export function formatDateTime(d) {
 }
 
 export const normKey = (k) =>
-  String(k ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  String(k ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
 
 // Replaces {{token}} with values[token]; unknown tokens become empty.
+// Supports Unicode (Devanagari, accented Latin, etc.) tokens.
 export function fillTemplate(str, values) {
-  return String(str ?? '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k) => {
+  return String(str ?? '').replace(/\{\{\s*([\p{L}\p{N}_]+)\s*\}\}/gu, (_, k) => {
     const v = values?.[k.toLowerCase()];
     return v == null ? '' : String(v);
   });

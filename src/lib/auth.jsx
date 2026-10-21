@@ -10,8 +10,12 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const loadProfile = useCallback(async (userId) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
-    setProfile(data || null);
+    try {
+      const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      setProfile(data || null);
+    } catch {
+      setProfile(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -19,17 +23,29 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return undefined;
     }
+    let mounted = true;
     supabase.auth.getSession().then(async ({ data }) => {
+      if (!mounted) return;
       setSession(data.session);
       if (data.session) await loadProfile(data.session.user.id);
-      setLoading(false);
+      if (mounted) setLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
+      if (!mounted) return;
       setSession(s);
-      if (s) setTimeout(() => loadProfile(s.user.id), 0);
-      else setProfile(null);
+      if (s) {
+        if (event === 'SIGNED_IN') setLoading(true);
+        await loadProfile(s.user.id);
+        if (mounted) setLoading(false);
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, [loadProfile]);
 
   const value = useMemo(

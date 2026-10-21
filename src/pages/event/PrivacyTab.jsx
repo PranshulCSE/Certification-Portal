@@ -15,15 +15,31 @@ export default function PrivacyTab({ ctx }) {
   const purge = async () => {
     setBusy(true);
     try {
-      const paths = await rpc('purge_event_data', { p_event: event.id });
+      // 1. Fetch file paths first so we safely delete storage files before nullifying database references.
+      let paths = [];
+      try {
+        paths = await rpc('get_event_pdf_paths', { p_event: event.id });
+      } catch {
+        // Fallback for setups where get_event_pdf_paths is not yet migrated
+        paths = [];
+      }
+
       for (const part of chunk(paths || [], 100)) {
         const { error } = await supabase.storage.from('certificates').remove(part);
-        if (error) console.error(error);
+        if (error) console.error('Storage deletion warning:', error);
       }
+
+      // 2. Finalize database cleanup
+      await rpc('purge_event_data', { p_event: event.id });
+
       toast.ok('Participant emails and certificate files deleted');
       setConfirm('');
       reload();
-    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

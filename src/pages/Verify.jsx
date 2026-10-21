@@ -7,13 +7,26 @@ import { BRAND } from '../config/branding';
 import { copyText, Spinner } from '../components/ui';
 
 function linkedinUrl(c) {
-  const d = new Date(c.issue_date);
+  const raw = String(c.issue_date || '');
+  let year = '';
+  let month = '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const parts = raw.split('-');
+    year = parts[0];
+    month = String(Number(parts[1]));
+  } else {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      year = String(d.getFullYear());
+      month = String(d.getMonth() + 1);
+    }
+  }
   const p = new URLSearchParams({
     startTask: 'CERTIFICATION_NAME',
     name: String(c.event_name || 'Certificate').slice(0, 100),
     organizationName: BRAND.universityName,
-    issueYear: String(d.getFullYear()),
-    issueMonth: String(d.getMonth() + 1),
+    ...(year ? { issueYear: year } : {}),
+    ...(month ? { issueMonth: month } : {}),
     certUrl: verifyUrl(c.code),
     certId: c.code,
   });
@@ -26,6 +39,10 @@ export default function Verify() {
   const [input, setInput] = useState(code || '');
   const [state, setState] = useState({ loading: !!code, result: null, error: '' });
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (code) setInput(code);
+  }, [code]);
 
   useEffect(() => {
     if (!code) { setState({ loading: false, result: null, error: '' }); return; }

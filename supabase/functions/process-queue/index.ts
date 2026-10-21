@@ -1,6 +1,6 @@
 // Email worker. Called every minute by pg_cron (header x-cron-secret) and by the
 // "Send next batch" button (signed-in user). Respects the daily cap and per-run batch size.
-import { adminClient, cleanSubject, fromAddress, handle, json, requireUser, toHtml, transporter } from "../_shared/common.ts";
+import { adminClient, cleanReplyTo, cleanSubject, fromAddress, handle, json, requireUser, toHtml, transporter } from "../_shared/common.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,6 +32,8 @@ Deno.serve(handle(async (req) => {
   let failed = 0;
   let note = "";
   let stop = false;
+  let stopDelayMs = 0;
+  let stopError: string | undefined = undefined;
 
   // deno-lint-ignore no-explicit-any
   const release = (job: any, error?: string, delayMs = 0) =>
@@ -40,55 +42,66 @@ Deno.serve(handle(async (req) => {
       last_error: error ?? null, scheduled_at: new Date(Date.now() + delayMs).toISOString(),
     }).eq("id", job.id);
 
-  for (const job of jobs) {
-    if (stop || Date.now() - started > 110_000) { await release(job); continue; }
-    try {
-      const { data: cert } = await admin.from("certificates").select("pdf_path,status,pdf_ready").eq("id", job.certificate_id).single();
-      if (!cert || cert.status !== "issued" || !cert.pdf_ready || !cert.pdf_path) throw Object.assign(new Error("Certificate file is not available"), { permanent: true });
-      const { data: file, error: dErr } = await admin.storage.from("certificates").download(cert.pdf_path);
-      if (dErr || !file) throw new Error("Could not read the certificate PDF");
-      const content = new Uint8Array(await file.arrayBuffer());
-
-      await tx.sendMail({
-        from: fromAddress(job.from_name),
-        to: job.to_email,
-        replyTo: job.reply_to || undefined,
-        subject: cleanSubject(job.subject),
-        text: job.body,
-        html: toHtml(job.body),
-        attachments: [{ filename: job.attachment_name || "certificate.pdf", content, contentType: "application/pdf" }],
-      });
-      await admin.from("email_jobs").update({ status: "sent", sent_at: new Date().toISOString(), last_error: null, locked_at: null }).eq("id", job.id);
-      sent++;
-      await sleep(250);
-    } catch (e) {
-      // deno-lint-ignore no-explicit-any
-      const err = e as any;
-      const msg = String(err?.response || err?.message || err).slice(0, 300);
-      const code = Number(err?.responseCode) || 0;
-
-      if (err?.code === "EAUTH" || code === 535) {
-        // Wrong/expired App Password: pause the whole run, keep everything queued.
-        await release(job, `Mail login failed. Check SMTP_USER / SMTP_APP_PASSWORD. (${msg})`, 15 * 60 * 1000);
-        note = "Mail login failed. Check the App Password secret.";
-        stop = true;
+  try {
+    for (const job of jobs) {
+      if (stop || Date.now() - started > 110_000) {
+        await release(job, stopError, stopDelayMs);
         continue;
       }
-      if (/daily user sending|sending limit|quota|rate limit|too many/i.test(msg) || code === 452 || code === 421) {
-        await release(job, msg, 60 * 60 * 1000);
-        note = "Mailbox sending limit reached. Will retry in an hour.";
-        stop = true;
-        continue;
+      try {
+        const { data: cert } = await admin.from("certificates").select("pdf_path,status,pdf_ready").eq("id", job.certificate_id).single();
+        if (!cert || cert.status !== "issued" || !cert.pdf_ready || !cert.pdf_path) throw Object.assign(new Error("Certificate file is not available"), { permanent: true });
+        const { data: file, error: dErr } = await admin.storage.from("certificates").download(cert.pdf_path);
+        if (dErr || !file) throw new Error("Could not read the certificate PDF");
+        const content = new Uint8Array(await file.arrayBuffer());
+
+        await tx.sendMail({
+          from: fromAddress(job.from_name),
+          to: job.to_email,
+          replyTo: cleanReplyTo(job.reply_to),
+          subject: cleanSubject(job.subject),
+          text: job.body,
+          html: toHtml(job.body),
+          attachments: [{ filename: job.attachment_name || "certificate.pdf", content, contentType: "application/pdf" }],
+        });
+        await admin.from("email_jobs").update({ status: "sent", sent_at: new Date().toISOString(), last_error: null, locked_at: null }).eq("id", job.id);
+        sent++;
+        await sleep(250);
+      } catch (e) {
+        // deno-lint-ignore no-explicit-any
+        const err = e as any;
+        const msg = String(err?.response || err?.message || err).slice(0, 300);
+        const code = Number(err?.responseCode) || 0;
+
+        if (err?.code === "EAUTH" || code === 535) {
+          // Wrong/expired App Password: pause the whole run, delay all remaining jobs.
+          stopDelayMs = 15 * 60 * 1000;
+          stopError = `Mail login failed. Check SMTP_USER / SMTP_APP_PASSWORD. (${msg})`;
+          await release(job, stopError, stopDelayMs);
+          note = "Mail login failed. Check the App Password secret.";
+          stop = true;
+          continue;
+        }
+        if (/daily user sending|sending limit|quota|rate limit|too many/i.test(msg) || code === 452 || code === 421) {
+          stopDelayMs = 60 * 60 * 1000;
+          stopError = msg;
+          await release(job, msg, stopDelayMs);
+          note = "Mailbox sending limit reached. Will retry in an hour.";
+          stop = true;
+          continue;
+        }
+        const permanent = err?.permanent || err?.code === "EENVELOPE" || (code >= 500 && code < 600);
+        const giveUp = permanent || job.attempts >= 3;
+        await admin.from("email_jobs").update(
+          giveUp
+            ? { status: permanent && !err?.permanent ? "bounced" : "failed", last_error: msg, locked_at: null }
+            : { status: "queued", last_error: msg, locked_at: null, scheduled_at: new Date(Date.now() + job.attempts * 5 * 60 * 1000).toISOString() },
+        ).eq("id", job.id);
+        failed++;
       }
-      const permanent = err?.permanent || err?.code === "EENVELOPE" || (code >= 500 && code < 600);
-      const giveUp = permanent || job.attempts >= 3;
-      await admin.from("email_jobs").update(
-        giveUp
-          ? { status: permanent && !err?.permanent ? "bounced" : "failed", last_error: msg, locked_at: null }
-          : { status: "queued", last_error: msg, locked_at: null, scheduled_at: new Date(Date.now() + job.attempts * 5 * 60 * 1000).toISOString() },
-      ).eq("id", job.id);
-      failed++;
     }
+  } finally {
+    try { tx.close(); } catch { /* ignore close error */ }
   }
 
   return json({ sent, failed, claimed: jobs.length, message: note || `Sent ${sent}, failed ${failed}` });

@@ -4,8 +4,19 @@ import { isEmail, normKey } from './format';
 
 export const MAX_ROWS = 5000;
 
+function cleanCell(c) {
+  if (c == null) return '';
+  if (c instanceof Date && !Number.isNaN(c.getTime())) {
+    const y = c.getFullYear();
+    const m = String(c.getMonth() + 1).padStart(2, '0');
+    const d = String(c.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(c).trim();
+}
+
 function toTable(rows) {
-  const clean = rows.map((r) => r.map((c) => (c == null ? '' : String(c).trim()))).filter((r) => r.some((c) => c !== ''));
+  const clean = rows.map((r) => r.map(cleanCell)).filter((r) => r.some((c) => c !== ''));
   if (clean.length < 2) throw new Error('The file needs a header row and at least one data row.');
   const seen = new Map();
   const headers = clean[0].map((h, i) => {
@@ -54,8 +65,10 @@ export function autoMap(headers) {
 }
 
 // existingEmails: Set of lower-cased emails already in the event.
-export function validateRows(rows, map, existingEmails = new Set(), { fixCase = false } = {}) {
-  const seen = new Set();
+// existingNames: Set of lower-cased names already in the event (checked if email column is omitted).
+export function validateRows(rows, map, existingEmails = new Set(), { fixCase = false, existingNames = new Set() } = {}) {
+  const seenEmails = new Set();
+  const seenNames = new Set();
   return rows.map((row, i) => {
     let name = (row[map.name] || '').replace(/\s+/g, ' ').trim();
     const email = map.email ? (row[map.email] || '').trim().toLowerCase() : '';
@@ -68,6 +81,7 @@ export function validateRows(rows, map, existingEmails = new Set(), { fixCase = 
     }
     let status = 'ok';
     let note = '';
+    const lowerName = name.toLowerCase();
     if (!name) {
       status = 'error';
       note = 'Name is empty';
@@ -80,11 +94,18 @@ export function validateRows(rows, map, existingEmails = new Set(), { fixCase = 
     } else if (email && existingEmails.has(email)) {
       status = 'duplicate';
       note = 'Already in this event';
-    } else if (email && seen.has(email)) {
+    } else if (email && seenEmails.has(email)) {
+      status = 'duplicate';
+      note = 'Repeated in this file';
+    } else if (!map.email && existingNames.has(lowerName)) {
+      status = 'duplicate';
+      note = 'Already in this event';
+    } else if (!map.email && seenNames.has(lowerName)) {
       status = 'duplicate';
       note = 'Repeated in this file';
     }
-    if (email) seen.add(email);
+    if (email) seenEmails.add(email);
+    if (name) seenNames.add(lowerName);
     return { index: i + 1, name, email: email || null, extra, status, note };
   });
 }

@@ -51,12 +51,13 @@ export async function loadTemplateAssets(tpl) {
   (cfg.images || []).forEach((i) => i.path && paths.add(i.path));
   (cfg.signatories || []).forEach((s) => s.path && paths.add(s.path));
   const images = {};
+  const failedPaths = [];
   await Promise.all(
     [...paths].map(async (p) => {
       try {
         images[p] = await loadImage(assetUrl(p));
       } catch {
-        /* missing image is skipped */
+        failedPaths.push(p);
       }
     })
   );
@@ -70,7 +71,7 @@ export async function loadTemplateAssets(tpl) {
   } else {
     bg = defaultBackground(tpl.width, tpl.height);
   }
-  return { bg, images };
+  return { bg, images, failedPaths };
 }
 
 // ---------- fonts ----------
@@ -88,13 +89,37 @@ export async function ensureFonts(config, values) {
 }
 
 // ---------- drawing ----------
+function splitWord(ctx, word, maxW) {
+  const chunks = [];
+  let cur = '';
+  for (const ch of word) {
+    const test = cur + ch;
+    if (cur && ctx.measureText(test).width > maxW) {
+      chunks.push(cur);
+      cur = ch;
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
 function wrapLines(ctx, text, maxW) {
   const out = [];
   String(text).split('\n').forEach((para) => {
-    const words = para.split(/\s+/).filter(Boolean);
-    if (!words.length) {
+    const rawWords = para.split(/\s+/).filter(Boolean);
+    if (!rawWords.length) {
       out.push('');
       return;
+    }
+    const words = [];
+    for (const w of rawWords) {
+      if (ctx.measureText(w).width > maxW) {
+        words.push(...splitWord(ctx, w, maxW));
+      } else {
+        words.push(w);
+      }
     }
     let line = words[0];
     for (let i = 1; i < words.length; i++) {
@@ -137,12 +162,15 @@ function drawText(ctx, f, values) {
     }
   }
   const lh = Number(f.lineHeight) || size * 1.3;
-  lines.forEach((l, i) => ctx.fillText(l, f.x, f.y + i * lh));
+  // Center multiple lines vertically on f.y
+  const totalH = (lines.length - 1) * lh;
+  const startY = f.y - totalH / 2;
+  lines.forEach((l, i) => ctx.fillText(l, f.x, startY + i * lh));
   const w = Math.max(60, ...lines.map((l) => ctx.measureText(l).width));
   const h = Math.max(lh, lines.length * lh);
   const x0 = f.align === 'left' ? f.x : f.align === 'right' ? f.x - w : f.x - w / 2;
   if (hasSpacing) ctx.letterSpacing = '0px';
-  return { ref: `field:${f.id}`, x: x0, y: f.y - lh / 2, w, h };
+  return { ref: `field:${f.id}`, x: x0, y: startY - lh / 2, w, h };
 }
 
 export function drawCertificate(canvas, tpl, assets, values, qrImage) {
@@ -262,15 +290,34 @@ export async function prepareBackground(file, maxEdge = 2600) {
 }
 
 // Scales every position/size when the template canvas size changes.
-export function rescaleConfig(cfg, oldW, newW) {
+// Uses horizontal and vertical ratios independently to avoid aspect ratio distortion.
+export function rescaleConfig(cfg, oldW, newW, oldH, newH) {
   if (!oldW || oldW === newW) return cfg;
-  const k = newW / oldW;
-  const r = (n) => Math.round(n * k);
+  const kx = newW / oldW;
+  const ky = (oldH && newH) ? newH / oldH : kx;
+  const rx = (n) => Math.round(n * kx);
+  const ry = (n) => Math.round(n * ky);
   return {
     ...cfg,
-    fields: (cfg.fields || []).map((f) => ({ ...f, x: r(f.x), y: r(f.y), size: r(f.size), maxWidth: r(f.maxWidth || 0), lineHeight: r(f.lineHeight || 0), spacing: r(f.spacing || 0) })),
-    qr: cfg.qr ? { ...cfg.qr, x: r(cfg.qr.x), y: r(cfg.qr.y), size: r(cfg.qr.size) } : cfg.qr,
-    images: (cfg.images || []).map((i) => ({ ...i, x: r(i.x), y: r(i.y), width: r(i.width) })),
-    signatories: (cfg.signatories || []).map((s) => ({ ...s, x: r(s.x), y: r(s.y), sigWidth: r(s.sigWidth), lineWidth: r(s.lineWidth), nameSize: r(s.nameSize), titleSize: r(s.titleSize) })),
+    fields: (cfg.fields || []).map((f) => ({
+      ...f,
+      x: rx(f.x),
+      y: ry(f.y),
+      size: rx(f.size),
+      maxWidth: rx(f.maxWidth || 0),
+      lineHeight: f.lineHeight ? ry(f.lineHeight) : 0,
+      spacing: rx(f.spacing || 0),
+    })),
+    qr: cfg.qr ? { ...cfg.qr, x: rx(cfg.qr.x), y: ry(cfg.qr.y), size: rx(cfg.qr.size) } : cfg.qr,
+    images: (cfg.images || []).map((i) => ({ ...i, x: rx(i.x), y: ry(i.y), width: rx(i.width) })),
+    signatories: (cfg.signatories || []).map((s) => ({
+      ...s,
+      x: rx(s.x),
+      y: ry(s.y),
+      sigWidth: rx(s.sigWidth),
+      lineWidth: rx(s.lineWidth),
+      nameSize: rx(s.nameSize),
+      titleSize: rx(s.titleSize),
+    })),
   };
 }

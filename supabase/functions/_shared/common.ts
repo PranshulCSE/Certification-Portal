@@ -53,7 +53,17 @@ export function transporter() {
   const user = Deno.env.get("SMTP_USER");
   const pass = (Deno.env.get("SMTP_APP_PASSWORD") || "").replace(/\s+/g, "");
   if (!user || !pass) throw new HttpError(500, "Mail is not configured: set the SMTP_USER and SMTP_APP_PASSWORD secrets.");
-  return nodemailer.createTransport({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass } });
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 100,
+    rateDelta: 1000,
+    rateLimit: 5,
+    auth: { user, pass },
+  });
 }
 
 const noNewlines = (s: string) => String(s ?? "").replace(/[\r\n]+/g, " ").trim();
@@ -64,15 +74,17 @@ export function fromAddress(displayName?: string | null) {
   return `"${name}" <${user}>`;
 }
 export const cleanSubject = noNewlines;
+export const cleanReplyTo = (s?: string | null) => (s ? noNewlines(s).replace(/["<>\r\n]/g, "").trim() || undefined : undefined);
 
 export function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 // Plain text -> simple HTML with clickable links and line breaks.
+// Preserves trailing punctuation (periods, commas, etc.) outside of the link tag.
 export function toHtml(text: string) {
   const body = escapeHtml(text)
-    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>')
+    .replace(/(https?:\/\/[^\s<]+?)([.!,?;)]?(?:\s|<|$))/g, '<a href="$1">$1</a>$2')
     .replace(/\r?\n/g, "<br>");
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111827">${body}</div>`;
 }

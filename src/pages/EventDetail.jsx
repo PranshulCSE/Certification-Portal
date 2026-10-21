@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { fetchAll } from '../lib/api';
 import { formatDate } from '../lib/format';
+import { defaultConfig, DEFAULT_SIZE } from '../lib/defaults';
 import { PageLoader, useToast } from '../components/ui';
 import Overview from './event/Overview';
 import TemplateDesigner from './event/TemplateDesigner';
@@ -29,6 +30,15 @@ export default function EventDetail() {
   const [data, setData] = useState(null);
   const [missing, setMissing] = useState(false);
 
+  const refreshJobs = useCallback(async () => {
+    try {
+      const jobs = await fetchAll(() => supabase.from('email_jobs').select('id,event_id,certificate_id,to_email,to_name,status,attempts,last_error,scheduled_at,sent_at,created_at').eq('event_id', id).order('created_at').order('id'));
+      setData((prev) => (prev ? { ...prev, jobs } : prev));
+    } catch {
+      /* ignore background refresh error */
+    }
+  }, [id]);
+
   const reload = useCallback(async () => {
     try {
       const { data: event, error } = await supabase.from('events').select('*').eq('id', id).maybeSingle();
@@ -41,7 +51,12 @@ export default function EventDetail() {
         fetchAll(() => supabase.from('email_jobs').select('id,event_id,certificate_id,to_email,to_name,status,attempts,last_error,scheduled_at,sent_at,created_at').eq('event_id', id).order('created_at').order('id')),
         supabase.from('profiles').select('full_name, department').eq('id', event.owner_id).maybeSingle(),
       ]);
-      setData({ event, template: tplRes.data, recipients, certs, jobs, owner: owner.data || { full_name: '', department: '' } });
+      let template = tplRes.data;
+      if (!template) {
+        template = { event_id: id, width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, config: defaultConfig(), image_path: null };
+        supabase.from('event_templates').insert(template).then(() => {}, () => {});
+      }
+      setData({ event, template, recipients, certs, jobs, owner: owner.data || { full_name: '', department: '' } });
     } catch (e) {
       toast.error(e.message);
     }
@@ -51,7 +66,7 @@ export default function EventDetail() {
 
   if (missing) return <p className="mt-10 text-center text-slate2">This event was not found, or you do not have access to it.</p>;
   if (!data) return <PageLoader />;
-  const ctx = { ...data, reload, ownerName: data.owner.full_name };
+  const ctx = { ...data, reload, refreshJobs, ownerName: data.owner.full_name };
   const { event } = data;
 
   return (

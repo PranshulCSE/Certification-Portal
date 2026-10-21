@@ -18,6 +18,8 @@ export default function IssueTab({ ctx }) {
   const [at, setAt] = useState('');
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [revokeFor, setRevokeFor] = useState(null);
   const [reason, setReason] = useState('');
   const purged = event.status === 'purged';
@@ -40,12 +42,13 @@ export default function IssueTab({ ctx }) {
   const failedJobs = jobs.filter((j) => j.status === 'failed').length;
   const sentCount = jobs.filter((j) => j.status === 'sent').length;
 
-  // keep the status table fresh while mail is going out
+  // keep the status table fresh while mail is going out using lightweight jobs polling
   useEffect(() => {
     if (!inQueue) return undefined;
-    const t = setInterval(reload, 8000);
+    const pollFn = ctx.refreshJobs || reload;
+    const t = setInterval(pollFn, 6000);
     return () => clearInterval(t);
-  }, [inQueue, reload]);
+  }, [inQueue, reload, ctx.refreshJobs]);
 
   const valuesFor = (cert, recipient) => {
     const ev = { name: cert.event_name, organizer: cert.organizer, event_date: cert.event_date };
@@ -163,10 +166,13 @@ export default function IssueTab({ ctx }) {
       const zip = new JSZip();
       let done = 0;
       setProgress({ label: 'Preparing ZIP', done, total: list.length });
-      for (const part of chunk(list, 100)) {
+      for (const part of chunk(list, 50)) {
         const urls = await signed(part.map((c) => c.pdf_path));
         await runPool(part, 5, async (c, i) => {
-          const res = await fetch(urls[i].signedUrl);
+          const u = urls[i]?.signedUrl;
+          if (!u) throw new Error(`Could not get signed URL for ${c.recipient_name}`);
+          const res = await fetch(u);
+          if (!res.ok) throw new Error(`Failed to download certificate for ${c.recipient_name} (${res.status})`);
           zip.file(`${safeFileName(c.recipient_name)}_${c.verification_code}.pdf`, await res.blob());
           done += 1;
           setProgress({ label: 'Preparing ZIP', done, total: list.length });
@@ -203,19 +209,25 @@ export default function IssueTab({ ctx }) {
     return out;
   }, [recipients, certs, certByRecipient]);
 
-  const shown = rows.filter((row) => {
-    if (q && !`${row.name} ${row.email || ''} ${row.cert?.verification_code || ''}`.toLowerCase().includes(q.toLowerCase())) return false;
-    const j = row.cert ? jobByCert[row.cert.id] : null;
-    switch (filter) {
-      case 'pending': return !row.cert;
-      case 'issued': return row.cert?.status === 'issued';
-      case 'revoked': return row.cert?.status === 'revoked';
-      case 'unsent': return row.cert?.status === 'issued' && (!j || j.status === 'cancelled');
-      case 'sent': return j?.status === 'sent';
-      case 'failed': return j && (j.status === 'failed' || j.status === 'bounced');
-      default: return true;
-    }
-  }).slice(0, 200);
+  const filtered = useMemo(() => {
+    return rows.filter((row) => {
+      if (q && !`${row.name} ${row.email || ''} ${row.cert?.verification_code || ''}`.toLowerCase().includes(q.toLowerCase())) return false;
+      const j = row.cert ? jobByCert[row.cert.id] : null;
+      switch (filter) {
+        case 'pending': return !row.cert;
+        case 'issued': return row.cert?.status === 'issued';
+        case 'revoked': return row.cert?.status === 'revoked';
+        case 'unsent': return row.cert?.status === 'issued' && (!j || j.status === 'cancelled');
+        case 'sent': return j?.status === 'sent';
+        case 'failed': return j && (j.status === 'failed' || j.status === 'bounced');
+        default: return true;
+      }
+    });
+  }, [rows, q, filter, jobByCert]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const shown = useMemo(() => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE), [filtered, currentPage]);
 
   const eta = limits && toQueue.length ? Math.ceil(toQueue.length / limits.batch_size) : 0;
   const days = limits ? Math.ceil(toQueue.length / limits.daily_cap) : 0;
@@ -308,7 +320,32 @@ export default function IssueTab({ ctx }) {
                 })}
               </tbody>
             </table>
-            {rows.length > shown.length && <p className="p-3 text-xs text-slate-500">Showing the first {shown.length} matches. Use search or filters to narrow down.</p>}
+            {filtered.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm">
+                <span className="text-xs text-slate-500">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} entries
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span className="flex items-center px-2 text-xs font-semibold text-slate2">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
