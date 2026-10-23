@@ -12,16 +12,21 @@ export function audit(action, entity, entityId, meta = {}) {
 }
 
 export async function callFn(name, body = {}) {
-  const { data, error } = await supabase.functions.invoke(name, { body });
-  if (error) {
-    let msg = error.message;
-    try {
-      const j = await error.context.json();
-      if (j?.error) msg = j.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(msg);
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+
+  const res = await fetch(`/api/${name}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || `Request failed with status ${res.status}`);
   }
   if (data?.error) throw new Error(data.error);
   return data;
