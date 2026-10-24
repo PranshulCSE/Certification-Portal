@@ -4,7 +4,7 @@ import { supabase, verifyUrl } from '../../lib/supabase';
 import { audit, uploadAsset } from '../../lib/api';
 import { buildValues, BASE_TOKENS, downloadBlob, normKey, uid } from '../../lib/format';
 import { defaultConfig, DEFAULT_SIZE, FONTS, SAMPLE_VALUES } from '../../lib/defaults';
-import { drawCertificate, ensureFonts, loadTemplateAssets, makeQrImage, prepareBackground, renderPdfBlob, rescaleConfig } from '../../lib/render';
+import { drawCertificate, ensureFonts, loadTemplateAssets, makeQrImage, prepareBackground, renderPdfBlob, rescaleConfig, cacheAssetImage, loadImage } from '../../lib/render';
 import { Field, Spinner, useToast } from '../../components/ui';
 
 const parseRef = (ref) => { const i = ref.indexOf(':'); return i < 0 ? [ref, null] : [ref.slice(0, i), ref.slice(i + 1)]; };
@@ -180,6 +180,13 @@ export default function TemplateDesigner({ ctx }) {
     setUploading('logo');
     try {
       const path = await uploadAsset(event.id, file, 'logo');
+      const localUrl = URL.createObjectURL(file);
+      try {
+        const preloadedImg = await loadImage(localUrl);
+        cacheAssetImage(path, preloadedImg);
+      } catch {
+        /* ignore preview preload error */
+      }
       const id = uid();
       edit((c) => ({ ...c, images: [...c.images, { id, label: file.name, path, x: Math.round(tpl.width / 2), y: 150, width: 220 }] }));
       setSelected(`image:${id}`);
@@ -188,7 +195,17 @@ export default function TemplateDesigner({ ctx }) {
   const setSignature = async (file) => {
     if (!file || !checkSize(file) || !selected) return;
     setUploading('sig');
-    try { patch(selected, { path: await uploadAsset(event.id, file, 'signature') }); } catch (e) { toast.error(e.message); } finally { setUploading(''); }
+    try {
+      const path = await uploadAsset(event.id, file, 'signature');
+      const localUrl = URL.createObjectURL(file);
+      try {
+        const preloadedImg = await loadImage(localUrl);
+        cacheAssetImage(path, preloadedImg);
+      } catch {
+        /* ignore preview preload error */
+      }
+      patch(selected, { path });
+    } catch (e) { toast.error(e.message); } finally { setUploading(''); }
   };
   const uploadBackground = async (file) => {
     if (!file) return;
@@ -198,6 +215,16 @@ export default function TemplateDesigner({ ctx }) {
     try {
       const { blob, width, height, ext } = await prepareBackground(file);
       const path = await uploadAsset(event.id, new File([blob], `bg.${ext}`, { type: blob.type || file.type }), 'bg');
+      
+      // Cache the loaded background locally so the canvas updates immediately
+      const localUrl = URL.createObjectURL(blob);
+      try {
+        const preloadedImg = await loadImage(localUrl);
+        cacheAssetImage(path, preloadedImg);
+      } catch {
+        /* ignore preview preload error */
+      }
+
       setTpl((t) => ({ ...t, image_path: path, width, height, config: rescaleConfig(t.config, t.width, width, t.height, height) }));
       setDirty(true);
       toast.ok(`Template image set (${width}×${height}). Check the text positions.`);

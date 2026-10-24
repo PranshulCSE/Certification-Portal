@@ -1,11 +1,22 @@
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
+import { supabase } from './supabase';
 import { assetUrl } from './api';
 import { fillTemplate } from './format';
 
 // ---------- image loading ----------
-const imageCache = new Map();
+export const imageCache = new Map();
+
+export function cacheAssetImage(path, img) {
+  if (!path || !img) return;
+  const p = Promise.resolve(img);
+  imageCache.set(path, p);
+  const url = assetUrl(path);
+  if (url) imageCache.set(url, p);
+}
+
 export function loadImage(src) {
+  if (!src) return Promise.reject(new Error('Image source is empty'));
   if (imageCache.has(src)) return imageCache.get(src);
   const p = new Promise((resolve, reject) => {
     const img = new Image();
@@ -17,6 +28,44 @@ export function loadImage(src) {
   imageCache.set(src, p);
   p.catch(() => imageCache.delete(src));
   return p;
+}
+
+export async function loadAssetImage(path) {
+  if (!path) return null;
+  if (path.startsWith('data:') || path.startsWith('blob:') || path.startsWith('http')) {
+    return loadImage(path);
+  }
+  if (imageCache.has(path)) {
+    return imageCache.get(path);
+  }
+  const publicUrl = assetUrl(path);
+  if (publicUrl && imageCache.has(publicUrl)) {
+    return imageCache.get(publicUrl);
+  }
+
+  // 1. Try public URL
+  if (publicUrl) {
+    try {
+      const img = await loadImage(publicUrl);
+      cacheAssetImage(path, img);
+      return img;
+    } catch {
+      // Fallback to direct storage download
+    }
+  }
+
+  // 2. Authenticated storage download fallback
+  try {
+    const { data: blob, error } = await supabase.storage.from('event-assets').download(path);
+    if (error || !blob) throw error || new Error('Blob is empty');
+    const blobUrl = URL.createObjectURL(blob);
+    const img = await loadImage(blobUrl);
+    cacheAssetImage(path, img);
+    return img;
+  } catch (err) {
+    console.error(`Failed to load asset image (${path}):`, err);
+    throw err;
+  }
 }
 
 const bgCache = new Map();
@@ -55,7 +104,7 @@ export async function loadTemplateAssets(tpl) {
   await Promise.all(
     [...paths].map(async (p) => {
       try {
-        images[p] = await loadImage(assetUrl(p));
+        images[p] = await loadAssetImage(p);
       } catch {
         failedPaths.push(p);
       }
@@ -64,8 +113,9 @@ export async function loadTemplateAssets(tpl) {
   let bg;
   if (tpl.image_path) {
     try {
-      bg = await loadImage(assetUrl(tpl.image_path));
+      bg = await loadAssetImage(tpl.image_path);
     } catch {
+      failedPaths.push(tpl.image_path);
       bg = defaultBackground(tpl.width, tpl.height);
     }
   } else {

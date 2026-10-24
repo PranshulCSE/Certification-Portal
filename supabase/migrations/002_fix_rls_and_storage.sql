@@ -28,6 +28,11 @@ returns boolean language sql stable security definer set search_path = public, a
 $$;
 
 -- 2. Storage Policies for 'event-assets' bucket
+-- Ensure bucket is marked public
+update storage.buckets set public = true where id = 'event-assets';
+insert into storage.buckets (id, name, public) values ('event-assets', 'event-assets', true)
+  on conflict (id) do update set public = true;
+
 -- event-assets is a public bucket used for template backgrounds, logos, and signatures.
 -- Anyone can view assets, and any active logged-in user (admin or issuer) can upload.
 
