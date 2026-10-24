@@ -90,7 +90,7 @@ export async function requireUser(req, admin) {
 }
 
 export function transporter() {
-  const user = process.env.SMTP_USER;
+  const user = (process.env.SMTP_USER || '').trim();
   const pass = (process.env.SMTP_APP_PASSWORD || '').replace(/\s+/g, '');
   if (!user || !pass) {
     throw new HttpError(500, 'Mail is not configured: set the SMTP_USER and SMTP_APP_PASSWORD environment variables.');
@@ -111,7 +111,7 @@ export function transporter() {
 export const noNewlines = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
 
 export function fromAddress(displayName) {
-  const user = process.env.SMTP_USER || '';
+  const user = (process.env.SMTP_USER || '').trim();
   const name = noNewlines(displayName || process.env.SMTP_FROM_NAME || 'Certificate Portal').replace(/["<>]/g, '');
   return `"${name}" <${user}>`;
 }
