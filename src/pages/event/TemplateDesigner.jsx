@@ -216,13 +216,19 @@ export default function TemplateDesigner({ ctx }) {
 
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from('event_templates').update({ image_path: tpl.image_path, width: tpl.width, height: tpl.height, config: tpl.config, updated_at: new Date().toISOString() }).eq('event_id', event.id);
+    const { error } = await supabase.from('event_templates').upsert({
+      event_id: event.id,
+      image_path: tpl.image_path,
+      width: tpl.width,
+      height: tpl.height,
+      config: tpl.config,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'event_id' });
     setSaving(false);
     if (error) return toast.error(error.message);
     audit('template.saved', 'event', event.id, { name: event.name });
     setDirty(false);
     toast.ok('Template saved');
-    reload();
   };
   const downloadPreview = async () => {
     try {

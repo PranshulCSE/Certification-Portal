@@ -54,7 +54,7 @@ export default function EventDetail() {
       let template = tplRes.data;
       if (!template) {
         template = { event_id: id, width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, config: defaultConfig(), image_path: null };
-        supabase.from('event_templates').insert(template).then(() => {}, () => {});
+        supabase.from('event_templates').upsert(template, { onConflict: 'event_id' }).then(() => {}, () => {});
       }
       setData({ event, template, recipients, certs, jobs, owner: owner.data || { full_name: '', department: '' } });
     } catch (e) {

@@ -77,15 +77,33 @@ export async function loadTemplateAssets(tpl) {
 // ---------- fonts ----------
 export const fontString = (f, size) => `${f.italic ? 'italic ' : ''}${f.weight || 400} ${size}px ${f.family}`;
 
+const loadedFontsCache = new Set();
+
 export async function ensureFonts(config, values) {
   if (!document.fonts?.load) return;
   const jobs = [];
-  (config.fields || []).forEach((f) => jobs.push(document.fonts.load(fontString(f, f.size || 28), fillTemplate(f.text, values) || 'Aa')));
-  (config.signatories || []).forEach((s) => {
-    jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), s.name || 'Aa'));
-    jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), s.title || 'Aa'));
+  (config.fields || []).forEach((f) => {
+    const key = `${fontString(f, f.size || 28)}|${f.text}`;
+    if (!loadedFontsCache.has(key)) {
+      loadedFontsCache.add(key);
+      jobs.push(document.fonts.load(fontString(f, f.size || 28), fillTemplate(f.text, values) || 'Aa'));
+    }
   });
-  await Promise.allSettled(jobs);
+  (config.signatories || []).forEach((s) => {
+    const k1 = `${fontString({ family: s.family, weight: 700 }, s.nameSize || 26)}|${s.name}`;
+    if (!loadedFontsCache.has(k1)) {
+      loadedFontsCache.add(k1);
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), s.name || 'Aa'));
+    }
+    const k2 = `${fontString({ family: s.family, weight: 400 }, s.titleSize || 20)}|${s.title}`;
+    if (!loadedFontsCache.has(k2)) {
+      loadedFontsCache.add(k2);
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), s.title || 'Aa'));
+    }
+  });
+  if (jobs.length > 0) {
+    await Promise.allSettled(jobs);
+  }
 }
 
 // ---------- drawing ----------
@@ -176,8 +194,8 @@ function drawText(ctx, f, values) {
 export function drawCertificate(canvas, tpl, assets, values, qrImage) {
   const { width: W, height: H } = tpl;
   const cfg = tpl.config || {};
-  canvas.width = W;
-  canvas.height = H;
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#ffffff';
