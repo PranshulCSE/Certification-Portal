@@ -184,6 +184,10 @@ export default function TemplateDesigner({ ctx }) {
       try {
         const preloadedImg = await loadImage(localUrl);
         cacheAssetImage(path, preloadedImg);
+        setAssets((prev) => ({
+          ...(prev || { images: {}, failedPaths: [] }),
+          images: { ...(prev?.images || {}), [path]: preloadedImg },
+        }));
       } catch {
         /* ignore preview preload error */
       }
@@ -201,6 +205,10 @@ export default function TemplateDesigner({ ctx }) {
       try {
         const preloadedImg = await loadImage(localUrl);
         cacheAssetImage(path, preloadedImg);
+        setAssets((prev) => ({
+          ...(prev || { images: {}, failedPaths: [] }),
+          images: { ...(prev?.images || {}), [path]: preloadedImg },
+        }));
       } catch {
         /* ignore preview preload error */
       }
@@ -221,6 +229,10 @@ export default function TemplateDesigner({ ctx }) {
       try {
         const preloadedImg = await loadImage(localUrl);
         cacheAssetImage(path, preloadedImg);
+        setAssets((prev) => ({
+          ...(prev || { images: {}, failedPaths: [] }),
+          bg: preloadedImg,
+        }));
       } catch {
         /* ignore preview preload error */
       }

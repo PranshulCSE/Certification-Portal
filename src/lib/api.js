@@ -32,7 +32,13 @@ export async function callFn(name, body = {}) {
   return data;
 }
 
-export const assetUrl = (path) => (path ? supabase.storage.from('event-assets').getPublicUrl(path).data.publicUrl : null);
+export const assetUrl = (path) => {
+  if (!path) return null;
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:') || path.startsWith('data:')) {
+    return path;
+  }
+  return supabase.storage.from('event-assets').getPublicUrl(path).data.publicUrl;
+};
 
 export async function uploadAsset(eventId, file, name) {
   const ext = (file.name?.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');

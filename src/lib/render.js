@@ -20,9 +20,22 @@ export function loadImage(src) {
   if (imageCache.has(src)) return imageCache.get(src);
   const p = new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    const isLocal = src.startsWith('blob:') || src.startsWith('data:');
+    if (!isLocal) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Image failed to load'));
+    img.onerror = () => {
+      // If crossOrigin anonymous failed on remote URL, retry without crossOrigin
+      if (!isLocal && img.crossOrigin) {
+        const retry = new Image();
+        retry.onload = () => resolve(retry);
+        retry.onerror = () => reject(new Error(`Image failed to load: ${src.slice(0, 80)}`));
+        retry.src = src;
+        return;
+      }
+      reject(new Error(`Image failed to load: ${src.slice(0, 80)}`));
+    };
     img.src = src;
   });
   imageCache.set(src, p);
