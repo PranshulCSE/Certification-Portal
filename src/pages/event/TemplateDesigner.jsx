@@ -265,8 +265,10 @@ export default function TemplateDesigner({ ctx }) {
         console.warn('Failed to load template background locally:', err);
       }
 
-      setTpl((t) => ({ ...t, image_path: path, width, height, config: rescaleConfig(t.config, t.width, width, t.height, height) }));
+      const nextTpl = { ...tpl, image_path: path, width, height, config: rescaleConfig(tpl.config, tpl.width, width, tpl.height, height) };
+      setTpl(nextTpl);
       setDirty(true);
+      await save(nextTpl);
       toast.ok(`Template image set (${width}×${height}). Check the text positions.`);
     } catch (e) { toast.error(e.message); } finally { setUploading(''); }
   };
@@ -281,25 +283,27 @@ export default function TemplateDesigner({ ctx }) {
     setDirty(true);
   };
 
-  const save = async () => {
+  const save = async (override) => {
     setSaving(true);
+    const next = override || tpl;
     const payload = {
       event_id: event.id,
-      image_path: tpl.image_path,
-      width: tpl.width,
-      height: tpl.height,
-      config: tpl.config,
+      image_path: next.image_path,
+      width: next.width,
+      height: next.height,
+      config: next.config,
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from('event_templates').upsert(payload, { onConflict: 'event_id' });
     setSaving(false);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return false; }
     if (ctx && ctx.template) {
       Object.assign(ctx.template, payload);
     }
     audit('template.saved', 'event', event.id, { name: event.name });
     setDirty(false);
     toast.ok('Template saved');
+    return true;
   };
   const downloadPreview = async () => {
     try {
@@ -324,7 +328,7 @@ export default function TemplateDesigner({ ctx }) {
           <button className="btn btn-ghost btn-sm" onClick={downloadPreview} disabled={!assets}><Download className="h-4 w-4" />Preview PDF</button>
           <div className="ml-auto flex items-center gap-2">
             {dirty && <span className="badge badge-warn">Unsaved changes</span>}
-            <button className="btn btn-accent btn-sm" onClick={save} disabled={saving || !dirty}>{saving ? <Spinner /> : <Save className="h-4 w-4" />}Save template</button>
+            <button className="btn btn-accent btn-sm" onClick={() => save()} disabled={saving || !dirty}>{saving ? <Spinner /> : <Save className="h-4 w-4" />}Save template</button>
           </div>
         </div>
         <input ref={bgInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => { uploadBackground(e.target.files[0]); e.target.value = ''; }} />

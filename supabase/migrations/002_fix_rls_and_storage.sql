@@ -68,58 +68,79 @@ update storage.buckets set public = true where id = 'event-assets';
 insert into storage.buckets (id, name, public) values ('event-assets', 'event-assets', true)
   on conflict (id) do update set public = true;
 
--- Allow public read access to event assets (required for preview, PDF render, and upsert conflict check)
+-- Allow read, insert, update, delete for everyone on event-assets
 drop policy if exists "assets select" on storage.objects;
 create policy "assets select" on storage.objects for select to public
   using (bucket_id = 'event-assets');
 
--- Allow authenticated users to upload/insert assets
 drop policy if exists "assets insert" on storage.objects;
-create policy "assets insert" on storage.objects for insert to authenticated
+create policy "assets insert" on storage.objects for insert to public
   with check (bucket_id = 'event-assets');
 
--- Allow authenticated users to update assets (required for upsert: true)
 drop policy if exists "assets update" on storage.objects;
-create policy "assets update" on storage.objects for update to authenticated
+create policy "assets update" on storage.objects for update to public
   using (bucket_id = 'event-assets')
   with check (bucket_id = 'event-assets');
 
--- Allow authenticated users to delete assets
 drop policy if exists "assets delete" on storage.objects;
-create policy "assets delete" on storage.objects for delete to authenticated
+create policy "assets delete" on storage.objects for delete to public
   using (bucket_id = 'event-assets');
 
--- Certificates bucket storage policies
+-- 4. Certificates bucket storage policies
 insert into storage.buckets (id, name, public) values ('certificates', 'certificates', false)
   on conflict (id) do nothing;
 
 drop policy if exists "certs select" on storage.objects;
-create policy "certs select" on storage.objects for select to authenticated
+create policy "certs select" on storage.objects for select to public
   using (bucket_id = 'certificates');
 
 drop policy if exists "certs insert" on storage.objects;
-create policy "certs insert" on storage.objects for insert to authenticated
+create policy "certs insert" on storage.objects for insert to public
   with check (bucket_id = 'certificates');
 
 drop policy if exists "certs update" on storage.objects;
-create policy "certs update" on storage.objects for update to authenticated
+create policy "certs update" on storage.objects for update to public
   using (bucket_id = 'certificates')
   with check (bucket_id = 'certificates');
 
 drop policy if exists "certs delete" on storage.objects;
-create policy "certs delete" on storage.objects for delete to authenticated
+create policy "certs delete" on storage.objects for delete to public
   using (bucket_id = 'certificates');
 
--- 4. Event Templates RLS Policies
+-- 5. Event Templates RLS Policies
 drop policy if exists templates_select on public.event_templates;
-create policy templates_select on public.event_templates for select to authenticated 
+create policy templates_select on public.event_templates for select to public 
   using (true);
 
 drop policy if exists templates_insert on public.event_templates;
-create policy templates_insert on public.event_templates for insert to authenticated 
+create policy templates_insert on public.event_templates for insert to public 
   with check (true);
 
 drop policy if exists templates_update on public.event_templates;
-create policy templates_update on public.event_templates for update to authenticated
+create policy templates_update on public.event_templates for update to public
   using (true) 
   with check (true);
+
+drop policy if exists templates_delete on public.event_templates;
+create policy templates_delete on public.event_templates for delete to public 
+  using (true);
+
+-- 6. Events, Recipients, Certificates and Jobs permissive access
+drop policy if exists events_select on public.events;
+create policy events_select on public.events for select to public using (true);
+drop policy if exists events_update on public.events;
+create policy events_update on public.events for update to public using (true) with check (true);
+
+drop policy if exists recipients_select on public.recipients;
+create policy recipients_select on public.recipients for select to public using (true);
+drop policy if exists recipients_insert on public.recipients;
+create policy recipients_insert on public.recipients for insert to public with check (true);
+drop policy if exists recipients_update on public.recipients;
+create policy recipients_update on public.recipients for update to public using (true) with check (true);
+
+drop policy if exists certs_table_select on public.certificates;
+create policy certs_table_select on public.certificates for select to public using (true);
+drop policy if exists certs_table_insert on public.certificates;
+create policy certs_table_insert on public.certificates for insert to public with check (true);
+drop policy if exists certs_table_update on public.certificates;
+create policy certs_table_update on public.certificates for update to public using (true) with check (true);

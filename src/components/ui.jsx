@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, AlertCircle, X, Loader2 } from 'lucide-react';
 
 // ---------- Toasts ----------
@@ -12,7 +12,7 @@ export function ToastProvider({ children }) {
     setItems((x) => [...x, { id, message, kind }]);
     setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), kind === 'error' ? 7000 : 3500);
   }, []);
-  const api = { ok: (m) => push(m, 'ok'), error: (m) => push(m, 'error') };
+  const api = useMemo(() => ({ ok: (m) => push(m, 'ok'), error: (m) => push(m, 'error') }), [push]);
   return (
     <ToastCtx.Provider value={api}>
       {children}

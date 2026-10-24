@@ -10,8 +10,10 @@ export const imageCache = new Map();
 export function cacheAssetImage(path, img) {
   if (!path || !img) return;
   const p = Promise.resolve(img);
+  const cleanPath = String(path).replace(/^\/+/, '');
+  imageCache.set(cleanPath, p);
   imageCache.set(path, p);
-  const url = assetUrl(path);
+  const url = assetUrl(cleanPath);
   if (url) imageCache.set(url, p);
 }
 
