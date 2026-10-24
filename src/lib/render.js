@@ -48,10 +48,14 @@ export async function loadAssetImage(path) {
   if (path.startsWith('data:') || path.startsWith('blob:') || path.startsWith('http')) {
     return loadImage(path);
   }
+  const cleanPath = String(path).replace(/^\/+/, '');
+  if (imageCache.has(cleanPath)) {
+    return imageCache.get(cleanPath);
+  }
   if (imageCache.has(path)) {
     return imageCache.get(path);
   }
-  const publicUrl = assetUrl(path);
+  const publicUrl = assetUrl(cleanPath);
   if (publicUrl && imageCache.has(publicUrl)) {
     return imageCache.get(publicUrl);
   }
@@ -60,7 +64,7 @@ export async function loadAssetImage(path) {
   if (publicUrl) {
     try {
       const img = await loadImage(publicUrl);
-      cacheAssetImage(path, img);
+      cacheAssetImage(cleanPath, img);
       return img;
     } catch {
       // Fallback to direct storage download
@@ -69,14 +73,14 @@ export async function loadAssetImage(path) {
 
   // 2. Authenticated storage download fallback
   try {
-    const { data: blob, error } = await supabase.storage.from('event-assets').download(path);
+    const { data: blob, error } = await supabase.storage.from('event-assets').download(cleanPath);
     if (error || !blob) throw error || new Error('Blob is empty');
     const blobUrl = URL.createObjectURL(blob);
     const img = await loadImage(blobUrl);
-    cacheAssetImage(path, img);
+    cacheAssetImage(cleanPath, img);
     return img;
   } catch (err) {
-    console.error(`Failed to load asset image (${path}):`, err);
+    console.error(`Failed to load asset image (${cleanPath}):`, err);
     throw err;
   }
 }
@@ -138,30 +142,30 @@ export async function loadTemplateAssets(tpl) {
 }
 
 // ---------- fonts ----------
-export const fontString = (f, size) => `${f.italic ? 'italic ' : ''}${f.weight || 400} ${size}px ${f.family}`;
+export const fontString = (f, size) => `${f?.italic ? 'italic ' : ''}${f?.weight || 400} ${size}px ${f?.family || 'sans-serif'}`;
 
 const loadedFontsCache = new Set();
 
 export async function ensureFonts(config, values) {
   if (!document.fonts?.load) return;
   const jobs = [];
-  (config.fields || []).forEach((f) => {
+  (config?.fields || []).forEach((f) => {
     const key = `${fontString(f, f.size || 28)}|${f.text}`;
     if (!loadedFontsCache.has(key)) {
       loadedFontsCache.add(key);
-      jobs.push(document.fonts.load(fontString(f, f.size || 28), fillTemplate(f.text, values) || 'Aa'));
+      jobs.push(document.fonts.load(fontString(f, f.size || 28), fillTemplate(f.text, values) || 'Aa').catch(() => {}));
     }
   });
-  (config.signatories || []).forEach((s) => {
+  (config?.signatories || []).forEach((s) => {
     const k1 = `${fontString({ family: s.family, weight: 700 }, s.nameSize || 26)}|${s.name}`;
     if (!loadedFontsCache.has(k1)) {
       loadedFontsCache.add(k1);
-      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), s.name || 'Aa'));
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), s.name || 'Aa').catch(() => {}));
     }
     const k2 = `${fontString({ family: s.family, weight: 400 }, s.titleSize || 20)}|${s.title}`;
     if (!loadedFontsCache.has(k2)) {
       loadedFontsCache.add(k2);
-      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), s.title || 'Aa'));
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), s.title || 'Aa').catch(() => {}));
     }
   });
   if (jobs.length > 0) {
@@ -255,47 +259,64 @@ function drawText(ctx, f, values) {
 }
 
 export function drawCertificate(canvas, tpl, assets, values, qrImage) {
-  const { width: W, height: H } = tpl;
+  if (!canvas || !tpl || !assets) return [];
+  const W = Number(tpl.width) || 1754;
+  const H = Number(tpl.height) || 1240;
   const cfg = tpl.config || {};
   if (canvas.width !== W) canvas.width = W;
   if (canvas.height !== H) canvas.height = H;
   const ctx = canvas.getContext('2d');
+  if (!ctx) return [];
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
-  if (assets.bg) ctx.drawImage(assets.bg, 0, 0, W, H);
+  if (assets.bg) {
+    try {
+      ctx.drawImage(assets.bg, 0, 0, W, H);
+    } catch (e) {
+      console.warn('Failed to draw background image:', e);
+    }
+  }
   const boxes = [];
 
   (cfg.images || []).forEach((im) => {
-    const img = assets.images[im.path];
-    const w = im.width || 200;
-    if (!img) {
-      boxes.push({ ref: `image:${im.id}`, x: im.x - w / 2, y: im.y - w / 4, w, h: w / 2 });
+    const img = (assets.images && im.path) ? assets.images[im.path] : null;
+    const w = Number(im.width) || 200;
+    if (!img || !img.width || !img.height) {
+      boxes.push({ ref: `image:${im.id}`, x: (im.x || 0) - w / 2, y: (im.y || 0) - w / 4, w, h: w / 2 });
       return;
     }
     const h = (w * img.height) / img.width;
-    ctx.drawImage(img, im.x - w / 2, im.y - h / 2, w, h);
-    boxes.push({ ref: `image:${im.id}`, x: im.x - w / 2, y: im.y - h / 2, w, h });
+    try {
+      ctx.drawImage(img, (im.x || 0) - w / 2, (im.y || 0) - h / 2, w, h);
+    } catch {
+      /* ignore draw error */
+    }
+    boxes.push({ ref: `image:${im.id}`, x: (im.x || 0) - w / 2, y: (im.y || 0) - h / 2, w, h });
   });
 
   (cfg.fields || []).forEach((f) => boxes.push(drawText(ctx, f, values)));
 
   (cfg.signatories || []).forEach((s) => {
     const color = s.color || '#1f2937';
-    const lw = s.lineWidth || 260;
-    const img = s.path ? assets.images[s.path] : null;
-    let top = s.y - 50;
-    if (img) {
-      const w = s.sigWidth || 220;
+    const lw = Number(s.lineWidth) || 260;
+    const img = (s.path && assets.images) ? assets.images[s.path] : null;
+    let top = (s.y || 0) - 50;
+    if (img && img.width && img.height) {
+      const w = Number(s.sigWidth) || 220;
       const h = (w * img.height) / img.width;
-      ctx.drawImage(img, s.x - w / 2, s.y - h - 4, w, h);
-      top = s.y - h - 4;
+      try {
+        ctx.drawImage(img, (s.x || 0) - w / 2, (s.y || 0) - h - 4, w, h);
+      } catch {
+        /* ignore draw error */
+      }
+      top = (s.y || 0) - h - 4;
     }
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(s.x - lw / 2, s.y);
-    ctx.lineTo(s.x + lw / 2, s.y);
+    ctx.moveTo((s.x || 0) - lw / 2, s.y || 0);
+    ctx.lineTo((s.x || 0) + lw / 2, s.y || 0);
     ctx.stroke();
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
@@ -303,27 +324,32 @@ export function drawCertificate(canvas, tpl, assets, values, qrImage) {
     const ns = s.nameSize || 26;
     const ts = s.titleSize || 20;
     ctx.font = fontString({ family: s.family, weight: 700 }, ns);
-    ctx.fillText(s.name || '', s.x, s.y + 10, lw + 80);
+    ctx.fillText(s.name || '', s.x || 0, (s.y || 0) + 10, lw + 80);
     ctx.font = fontString({ family: s.family, weight: 400 }, ts);
-    ctx.fillText(s.title || '', s.x, s.y + 10 + ns * 1.25, lw + 80);
-    boxes.push({ ref: `sig:${s.id}`, x: s.x - lw / 2, y: top, w: lw, h: s.y + 10 + ns * 1.25 + ts - top });
+    ctx.fillText(s.title || '', s.x || 0, (s.y || 0) + 10 + ns * 1.25, lw + 80);
+    boxes.push({ ref: `sig:${s.id}`, x: (s.x || 0) - lw / 2, y: top, w: lw, h: (s.y || 0) + 10 + ns * 1.25 + ts - top });
   });
 
   const qr = cfg.qr;
   if (qr?.enabled) {
-    const size = qr.size || 180;
+    const size = Number(qr.size) || 180;
     if (qrImage) {
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(qr.x - size / 2 - 8, qr.y - size / 2 - 8, size + 16, size + 16);
-      ctx.drawImage(qrImage, qr.x - size / 2, qr.y - size / 2, size, size);
+      ctx.fillRect((qr.x || 0) - size / 2 - 8, (qr.y || 0) - size / 2 - 8, size + 16, size + 16);
+      try {
+        ctx.drawImage(qrImage, (qr.x || 0) - size / 2, (qr.y || 0) - size / 2, size, size);
+      } catch {
+        /* ignore draw error */
+      }
     }
-    boxes.push({ ref: 'qr', x: qr.x - size / 2, y: qr.y - size / 2, w: size, h: size });
+    boxes.push({ ref: 'qr', x: (qr.x || 0) - size / 2, y: (qr.y || 0) - size / 2, w: size, h: size });
   }
   return boxes;
 }
 
 // ---------- PDF ----------
 export function canvasToPdfBlob(canvas) {
+  if (!canvas) throw new Error('Canvas element is required for PDF export');
   const w = canvas.width;
   const h = canvas.height;
   const landscape = w >= h;

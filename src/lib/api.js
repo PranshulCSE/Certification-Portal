@@ -37,12 +37,13 @@ export const assetUrl = (path) => {
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:') || path.startsWith('data:')) {
     return path;
   }
-  return supabase.storage.from('event-assets').getPublicUrl(path).data.publicUrl;
+  const cleanPath = String(path).replace(/^\/+/, '');
+  return supabase.storage.from('event-assets').getPublicUrl(cleanPath).data.publicUrl;
 };
 
 export async function uploadAsset(eventId, file, name) {
   const ext = (file.name?.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const path = `${eventId}/${name}-${Date.now()}.${ext}`;
+  const path = `${eventId}/${name}-${Date.now()}.${ext}`.replace(/^\/+/, '');
   const { error } = await supabase.storage.from('event-assets').upload(path, file, { upsert: true, contentType: file.type || undefined });
   if (error) throw new Error(error.message);
   return path;

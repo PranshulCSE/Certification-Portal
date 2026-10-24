@@ -104,29 +104,38 @@ export default function TemplateDesigner({ ctx }) {
     if (!assets || !canvasRef.current) return;
     const my = ++drawId.current;
     (async () => {
-      await ensureFonts(cfg, values);
-      if (my !== drawId.current) return;
-      const canvas = canvasRef.current;
-      const boxes = drawCertificate(canvas, tpl, assets, values, qrImg);
-      boxesRef.current = boxes;
-      const ctx2 = canvas.getContext('2d');
-      const lw = Math.max(2, tpl.width / 700);
-      boxes.forEach((b) => {
-        const sel = b.ref === selected;
-        ctx2.save();
-        ctx2.lineWidth = sel ? lw * 2 : lw;
-        ctx2.strokeStyle = sel ? '#d9730d' : 'rgba(100,116,139,.55)';
-        if (!sel) ctx2.setLineDash([lw * 5, lw * 4]);
-        ctx2.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8);
-        ctx2.restore();
-      });
+      try {
+        await ensureFonts(cfg, values);
+        if (my !== drawId.current) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const boxes = drawCertificate(canvas, tpl, assets, values, qrImg);
+        if (!boxes) return;
+        boxesRef.current = boxes;
+        const ctx2 = canvas.getContext('2d');
+        if (!ctx2) return;
+        const lw = Math.max(2, (tpl?.width || DEFAULT_SIZE.width) / 700);
+        boxes.forEach((b) => {
+          const sel = b.ref === selected;
+          ctx2.save();
+          ctx2.lineWidth = sel ? lw * 2 : lw;
+          ctx2.strokeStyle = sel ? '#d9730d' : 'rgba(100,116,139,.55)';
+          if (!sel) ctx2.setLineDash([lw * 5, lw * 4]);
+          ctx2.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8);
+          ctx2.restore();
+        });
+      } catch (err) {
+        console.error('Error drawing certificate preview:', err);
+      }
     })();
   }, [tpl, assets, qrImg, values, selected, cfg]);
 
   // drag
   const toCanvas = (e) => {
     const c = canvasRef.current;
+    if (!c) return { x: 0, y: 0 };
     const r = c.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0, y: 0 };
     return { x: ((e.clientX - r.left) * c.width) / r.width, y: ((e.clientY - r.top) * c.height) / r.height };
   };
   const onDown = (e) => {
@@ -182,14 +191,20 @@ export default function TemplateDesigner({ ctx }) {
       const path = await uploadAsset(event.id, file, 'logo');
       const localUrl = URL.createObjectURL(file);
       try {
-        const preloadedImg = await loadImage(localUrl);
+        const preloadedImg = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = localUrl;
+        });
         cacheAssetImage(path, preloadedImg);
         setAssets((prev) => ({
-          ...(prev || { images: {}, failedPaths: [] }),
+          bg: prev?.bg || null,
+          failedPaths: prev?.failedPaths || [],
           images: { ...(prev?.images || {}), [path]: preloadedImg },
         }));
-      } catch {
-        /* ignore preview preload error */
+      } catch (err) {
+        console.warn('Failed to load logo image locally:', err);
       }
       const id = uid();
       edit((c) => ({ ...c, images: [...c.images, { id, label: file.name, path, x: Math.round(tpl.width / 2), y: 150, width: 220 }] }));
@@ -203,14 +218,20 @@ export default function TemplateDesigner({ ctx }) {
       const path = await uploadAsset(event.id, file, 'signature');
       const localUrl = URL.createObjectURL(file);
       try {
-        const preloadedImg = await loadImage(localUrl);
+        const preloadedImg = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = localUrl;
+        });
         cacheAssetImage(path, preloadedImg);
         setAssets((prev) => ({
-          ...(prev || { images: {}, failedPaths: [] }),
+          bg: prev?.bg || null,
+          failedPaths: prev?.failedPaths || [],
           images: { ...(prev?.images || {}), [path]: preloadedImg },
         }));
-      } catch {
-        /* ignore preview preload error */
+      } catch (err) {
+        console.warn('Failed to load signature image locally:', err);
       }
       patch(selected, { path });
     } catch (e) { toast.error(e.message); } finally { setUploading(''); }
@@ -226,15 +247,22 @@ export default function TemplateDesigner({ ctx }) {
       
       // Cache the loaded background locally so the canvas updates immediately
       const localUrl = URL.createObjectURL(blob);
+      let preloadedImg = null;
       try {
-        const preloadedImg = await loadImage(localUrl);
+        preloadedImg = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = localUrl;
+        });
         cacheAssetImage(path, preloadedImg);
         setAssets((prev) => ({
-          ...(prev || { images: {}, failedPaths: [] }),
+          images: prev?.images || {},
+          failedPaths: prev?.failedPaths || [],
           bg: preloadedImg,
         }));
-      } catch {
-        /* ignore preview preload error */
+      } catch (err) {
+        console.warn('Failed to load template background locally:', err);
       }
 
       setTpl((t) => ({ ...t, image_path: path, width, height, config: rescaleConfig(t.config, t.width, width, t.height, height) }));
@@ -255,16 +283,20 @@ export default function TemplateDesigner({ ctx }) {
 
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from('event_templates').upsert({
+    const payload = {
       event_id: event.id,
       image_path: tpl.image_path,
       width: tpl.width,
       height: tpl.height,
       config: tpl.config,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'event_id' });
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from('event_templates').upsert(payload, { onConflict: 'event_id' });
     setSaving(false);
     if (error) return toast.error(error.message);
+    if (ctx && ctx.template) {
+      Object.assign(ctx.template, payload);
+    }
     audit('template.saved', 'event', event.id, { name: event.name });
     setDirty(false);
     toast.ok('Template saved');
@@ -297,11 +329,30 @@ export default function TemplateDesigner({ ctx }) {
         </div>
         <input ref={bgInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => { uploadBackground(e.target.files[0]); e.target.value = ''; }} />
         <div className="card overflow-auto bg-slate-200 p-3">
-          {!assets ? <div className="flex h-64 items-center justify-center text-slate2"><Spinner className="mr-2" />Loading template…</div> : (
-            <canvas ref={canvasRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-              style={{ maxWidth: '100%', maxHeight: '72vh', width: 'auto', height: 'auto', display: 'block', margin: '0 auto', touchAction: 'none', cursor: 'move' }}
-              className="bg-white shadow" aria-label="Certificate preview. Drag items to move them." />
+          {!assets && (
+            <div className="flex h-64 items-center justify-center text-slate2">
+              <Spinner className="mr-2" />Loading template…
+            </div>
           )}
+          <canvas
+            ref={canvasRef}
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '72vh',
+              width: 'auto',
+              height: 'auto',
+              display: assets ? 'block' : 'none',
+              margin: '0 auto',
+              touchAction: 'none',
+              cursor: 'move',
+            }}
+            className="bg-white shadow"
+            aria-label="Certificate preview. Drag items to move them."
+          />
         </div>
         <p className="mt-2 text-xs text-slate-500">{tpl.width}×{tpl.height}px. Drag any dashed box to move it. Changes to the template apply to certificates generated after you save; already generated certificates are not changed. Use {'{{name}}'} where the participant’s name should appear.</p>
       </div>
