@@ -49,6 +49,83 @@ export async function uploadAsset(eventId, file, name) {
   return path;
 }
 
+export async function uploadGlobalAsset(file, { name, category = 'logo', signerName = '', signerTitle = '' } = {}) {
+  const ext = (file.name?.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanCategory = ['logo', 'signature'].includes(category) ? category : 'other';
+  const fileName = `${cleanCategory}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+  const path = `global/${cleanCategory}s/${fileName}`.replace(/^\/+/, '');
+
+  const { error: uploadErr } = await supabase.storage.from('event-assets').upload(path, file, {
+    upsert: true,
+    contentType: file.type || undefined,
+  });
+  if (uploadErr) throw new Error(uploadErr.message);
+
+  let width = null;
+  let height = null;
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = url;
+    });
+    width = img.naturalWidth || img.width;
+    height = img.naturalHeight || img.height;
+    URL.revokeObjectURL(url);
+  } catch {
+    /* ignore dimension read error */
+  }
+
+  const { data: userRes } = await supabase.auth.getUser();
+  const userId = userRes?.user?.id || null;
+
+  const metadata = {};
+  if (signerName) metadata.signer_name = signerName.trim();
+  if (signerTitle) metadata.signer_title = signerTitle.trim();
+
+  const row = {
+    name: (name || file.name.replace(/\.[^/.]+$/, '')).trim(),
+    category: cleanCategory,
+    path,
+    width,
+    height,
+    file_size: file.size || null,
+    mime_type: file.type || null,
+    metadata,
+    created_by: userId,
+  };
+
+  const { data, error: insertErr } = await supabase.from('global_assets').insert(row).select().single();
+  if (insertErr) {
+    throw new Error(insertErr.message);
+  }
+  return data;
+}
+
+export async function fetchGlobalAssets(category = null) {
+  let query = supabase.from('global_assets').select('*').order('created_at', { ascending: false });
+  if (category && category !== 'all') {
+    query = query.eq('category', category);
+  }
+  const { data, error } = await query;
+  if (error) {
+    throw error;
+  }
+  return data || [];
+}
+
+export async function deleteGlobalAsset(id, path) {
+  if (path) {
+    await supabase.storage.from('event-assets').remove([path]).catch(() => {});
+  }
+  if (id) {
+    const { error } = await supabase.from('global_assets').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+}
+
 // Supabase returns at most 1000 rows per request; this pages through all of them.
 export async function fetchAll(build) {
   const pageSize = 1000;
