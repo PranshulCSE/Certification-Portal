@@ -11,6 +11,7 @@ import EventDetail from './pages/EventDetail';
 import Issuers from './pages/Issuers';
 import Activity from './pages/Activity';
 import Settings from './pages/Settings';
+import GlobalStore from './pages/GlobalStore';
 import Verify from './pages/Verify';
 import { BRAND } from './config/branding';
 
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/" element={<Events />} />
         <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/activity" element={<Activity />} />
+        <Route path="/global-store" element={<GlobalStore />} />
         <Route path="/issuers" element={<Protected admin><Issuers /></Protected>} />
         <Route path="/settings" element={<Protected admin><Settings /></Protected>} />
       </Route>
