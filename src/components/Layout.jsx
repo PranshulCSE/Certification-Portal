@@ -20,6 +20,7 @@ export default function Layout() {
           </button>
           <nav className="ml-2 flex items-center gap-1">
             <NavLink to="/" end className={link}>Events</NavLink>
+            <NavLink to="/global-store" className={link}>Global Store</NavLink>
             {isAdmin && <NavLink to="/issuers" className={link}>Issuers</NavLink>}
             <NavLink to="/activity" className={link}>Activity</NavLink>
             {isAdmin && <NavLink to="/settings" className={link}>Settings</NavLink>}

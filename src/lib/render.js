@@ -151,23 +151,24 @@ const loadedFontsCache = new Set();
 export async function ensureFonts(config, values) {
   if (!document.fonts?.load) return;
   const jobs = [];
+  const cleanSample = (txt) => (fillTemplate(txt, values) || 'Aa').replace(/[\r\n\t]+/g, ' ').trim() || 'Aa';
   (config?.fields || []).forEach((f) => {
     const key = `${fontString(f, f.size || 28)}|${f.text}`;
     if (!loadedFontsCache.has(key)) {
       loadedFontsCache.add(key);
-      jobs.push(document.fonts.load(fontString(f, f.size || 28), fillTemplate(f.text, values) || 'Aa').catch(() => {}));
+      jobs.push(document.fonts.load(fontString(f, f.size || 28), cleanSample(f.text)).catch(() => {}));
     }
   });
   (config?.signatories || []).forEach((s) => {
     const k1 = `${fontString({ family: s.family, weight: 700 }, s.nameSize || 26)}|${s.name}`;
     if (!loadedFontsCache.has(k1)) {
       loadedFontsCache.add(k1);
-      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), s.name || 'Aa').catch(() => {}));
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 700 }, s.nameSize || 26), (s.name || 'Aa').replace(/[\r\n\t]+/g, ' ')).catch(() => {}));
     }
     const k2 = `${fontString({ family: s.family, weight: 400 }, s.titleSize || 20)}|${s.title}`;
     if (!loadedFontsCache.has(k2)) {
       loadedFontsCache.add(k2);
-      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), s.title || 'Aa').catch(() => {}));
+      jobs.push(document.fonts.load(fontString({ family: s.family, weight: 400 }, s.titleSize || 20), (s.title || 'Aa').replace(/[\r\n\t]+/g, ' ')).catch(() => {}));
     }
   });
   if (jobs.length > 0) {
@@ -194,12 +195,14 @@ function splitWord(ctx, word, maxW) {
 
 function wrapLines(ctx, text, maxW) {
   const out = [];
-  String(text).split('\n').forEach((para) => {
-    const rawWords = para.split(/\s+/).filter(Boolean);
-    if (!rawWords.length) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  normalized.split('\n').forEach((para) => {
+    // If paragraph is empty or only whitespace, keep it as an empty line
+    if (!para.trim()) {
       out.push('');
       return;
     }
+    const rawWords = para.split(/\s+/).filter(Boolean);
     const words = [];
     for (const w of rawWords) {
       if (ctx.measureText(w).width > maxW) {
@@ -208,7 +211,7 @@ function wrapLines(ctx, text, maxW) {
         words.push(w);
       }
     }
-    let line = words[0];
+    let line = words[0] || '';
     for (let i = 1; i < words.length; i++) {
       const test = `${line} ${words[i]}`;
       if (ctx.measureText(test).width > maxW) {
@@ -218,13 +221,14 @@ function wrapLines(ctx, text, maxW) {
         line = test;
       }
     }
-    out.push(line);
+    if (line) out.push(line);
   });
-  return out;
+  return out.length ? out : [''];
 }
 
 function drawText(ctx, f, values) {
-  const text = fillTemplate(f.text, values);
+  const rawText = fillTemplate(f.text, values);
+  const text = String(rawText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const hasSpacing = 'letterSpacing' in ctx;
   ctx.textBaseline = 'middle';
   ctx.textAlign = f.align || 'center';
@@ -238,22 +242,25 @@ function drawText(ctx, f, values) {
   if (f.mode === 'wrap' && maxW) {
     lines = wrapLines(ctx, text, maxW);
   } else {
+    // Support multi-line split even when mode is 'fit'
     lines = text.split('\n');
     if (maxW) {
       const minSize = f.minSize || Math.max(12, (f.size || 28) * 0.5);
-      const widest = () => Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+      const widest = () => Math.max(0, ...lines.map((l) => (l ? ctx.measureText(l).width : 0)));
       while (size > minSize && widest() > maxW) {
         size -= 1;
         ctx.font = fontString(f, size);
       }
     }
   }
-  const lh = Number(f.lineHeight) || size * 1.3;
+  const lh = Number(f.lineHeight) || size * 1.35;
   // Center multiple lines vertically on f.y
   const totalH = (lines.length - 1) * lh;
   const startY = f.y - totalH / 2;
-  lines.forEach((l, i) => ctx.fillText(l, f.x, startY + i * lh));
-  const w = Math.max(60, ...lines.map((l) => ctx.measureText(l).width));
+  lines.forEach((l, i) => {
+    if (l) ctx.fillText(l, f.x, startY + i * lh);
+  });
+  const w = Math.max(60, ...lines.map((l) => (l ? ctx.measureText(l).width : 0)));
   const h = Math.max(lh, lines.length * lh);
   const x0 = f.align === 'left' ? f.x : f.align === 'right' ? f.x - w : f.x - w / 2;
   if (hasSpacing) ctx.letterSpacing = '0px';
