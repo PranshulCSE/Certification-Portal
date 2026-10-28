@@ -1,6 +1,3 @@
-import { uid } from './format';
-import { FONTS } from './defaults';
-
 export const PAPER_SIZES = [
   { id: 'A4-landscape', name: 'A4 Landscape', width: 1754, height: 1240, orientation: 'landscape', description: 'Standard diploma format (150 DPI)' },
   { id: 'A4-portrait', name: 'A4 Portrait', width: 1240, height: 1754, orientation: 'portrait', description: 'Vertical diploma format (150 DPI)' },

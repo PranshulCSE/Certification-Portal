@@ -95,6 +95,7 @@ export function defaultConfig() {
     ],
     qr: { enabled: true, x: 1580, y: 1040, size: 190 },
     images: [],
+    badges: [],
     signatories: [
       { id: uid(), name: 'Authorised Signatory', title: 'Organizing Committee', path: null, x: 520, y: 980, sigWidth: 240, lineWidth: 300, nameSize: 28, titleSize: 22, family: "'Manrope', 'Noto Sans Devanagari', sans-serif", color: '#1f2937' },
     ],
