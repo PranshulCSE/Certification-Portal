@@ -77,7 +77,7 @@ export default function PresetPickerModal({ open, onClose, onSelectPreset }) {
                   >
                     <div
                       className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-                      style={{ backgroundColor: `${p.badgeColor}20`, color: p.badgeColor }}
+                      style={{ backgroundColor: `${p.themeColor || '#c8a24a'}20`, color: p.themeColor || '#c8a24a' }}
                     >
                       <Icon className="h-4 w-4" />
                     </div>
@@ -110,16 +110,16 @@ export default function PresetPickerModal({ open, onClose, onSelectPreset }) {
             <div className="relative mb-5 overflow-hidden rounded-xl border border-line bg-gradient-to-br from-white via-slate-50 to-slate-100 p-6 shadow-sm">
               <div
                 className="absolute inset-x-0 top-0 h-1.5"
-                style={{ backgroundColor: activePreset.badgeColor }}
+                style={{ backgroundColor: activePreset.themeColor || '#c8a24a' }}
               />
 
               <div className="space-y-3 text-center">
                 <div
                   className="mx-auto flex h-12 w-12 items-center justify-center rounded-full shadow-inner"
                   style={{
-                    backgroundColor: `${activePreset.badgeColor}15`,
-                    border: `2px solid ${activePreset.badgeColor}`,
-                    color: activePreset.badgeColor,
+                    backgroundColor: `${activePreset.themeColor || '#c8a24a'}15`,
+                    border: `2px solid ${activePreset.themeColor || '#c8a24a'}`,
+                    color: activePreset.themeColor || '#c8a24a',
                   }}
                 >
                   <Sparkles className="h-6 w-6" />
@@ -142,7 +142,7 @@ export default function PresetPickerModal({ open, onClose, onSelectPreset }) {
                 <div className="mt-4 flex items-center justify-center gap-6 border-t border-line/60 pt-3 text-[10px] text-slate-400">
                   <span>Standard {activePreset.width}×{activePreset.height}px</span>
                   <span>•</span>
-                  <span>{activePreset.config.badges?.length || 0} Vector Badges</span>
+                  <span>{activePreset.config.fields?.length || 0} Text Elements</span>
                   <span>•</span>
                   <span>{activePreset.config.signatories?.length || 0} Signatories</span>
                 </div>
@@ -159,7 +159,7 @@ export default function PresetPickerModal({ open, onClose, onSelectPreset }) {
                 </li>
                 <li className="flex items-center gap-1.5">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  Vector badges & gold foil seals
+                  Custom institutional background frame
                 </li>
                 <li className="flex items-center gap-1.5">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
