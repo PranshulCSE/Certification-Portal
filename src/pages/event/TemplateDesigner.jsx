@@ -26,8 +26,6 @@ import {
   ZoomOut,
   Maximize2,
   Hand,
-  Award,
-  Sparkles,
   LayoutTemplate,
   Sliders,
   ChevronUp,
@@ -49,7 +47,7 @@ import {
   cacheAssetImage,
   loadImage,
 } from '../../lib/render';
-import { PAPER_SIZES, BADGE_VARIANTS, CERTIFICATE_PRESETS } from '../../lib/presets';
+import { PAPER_SIZES, CERTIFICATE_PRESETS } from '../../lib/presets';
 import { Field, Spinner, useToast } from '../../components/ui';
 import GlobalAssetPickerModal from '../../components/GlobalAssetPickerModal';
 import PresetPickerModal from '../../components/PresetPickerModal';
@@ -59,7 +57,7 @@ const parseRef = (ref) => {
   return i < 0 ? [ref, null] : [ref.slice(0, i), ref.slice(i + 1)];
 };
 
-const LIST = { field: 'fields', image: 'images', sig: 'signatories', badge: 'badges' };
+const LIST = { field: 'fields', image: 'images', sig: 'signatories' };
 
 function getItem(cfg, ref) {
   if (!ref || !cfg) return null;
@@ -91,7 +89,6 @@ function normalize(cfg) {
   const base = cfg && Array.isArray(cfg.fields) ? cfg : defaultConfig();
   return {
     fields: base.fields || [],
-    badges: base.badges || [],
     images: base.images || [],
     signatories: base.signatories || [],
     qr: base.qr || { enabled: true, x: 1580, y: 1040, size: 190 },
@@ -194,7 +191,6 @@ export default function TemplateDesigner({ ctx }) {
 
   // Modals state
   const [presetModalOpen, setPresetModalOpen] = useState(false);
-  const [badgeMenuOpen, setBadgeMenuOpen] = useState(false);
   const [globalPickerOpen, setGlobalPickerOpen] = useState(false);
   const [globalPickerCat, setGlobalPickerCat] = useState('all');
   const [pickerTarget, setPickerTarget] = useState(null); // 'logo' or sig ID
@@ -340,9 +336,6 @@ export default function TemplateDesigner({ ctx }) {
         if (it.maxWidth) {
           patchObj.maxWidth = Math.max(80, Math.min(currentTpl.width, Math.round(it.maxWidth * factor)));
         }
-      } else if (t === 'badge') {
-        const curSize = it.size || 190;
-        patchObj.size = Math.max(40, Math.min(1600, Math.round(curSize * factor)));
       } else if (t === 'image') {
         const curW = it.width || 200;
         patchObj.width = Math.max(30, Math.min(currentTpl.width, Math.round(curW * factor)));
@@ -675,7 +668,6 @@ export default function TemplateDesigner({ ctx }) {
 
       if (e.key === 'Escape') {
         setSelected(null);
-        setBadgeMenuOpen(false);
         setSizeMenuOpen(false);
         return;
       }
@@ -782,40 +774,6 @@ export default function TemplateDesigner({ ctx }) {
     setSidebarTab('properties');
   };
 
-  const addBadge = (variant = 'gold-seal') => {
-    recordHistory();
-    const id = uid();
-    const newRef = `badge:${id}`;
-    const isWreath = variant === 'laurel-wreath';
-    const isDivider = variant === 'divider-flourish';
-    const isRibbon = variant === 'ribbon-banner';
-    const isCorner = variant === 'corner-flourish';
-
-    edit((c) => ({
-      ...c,
-      badges: [
-        ...(c.badges || []),
-        {
-          id,
-          type: 'badge',
-          variant,
-          x: Math.round(tpl.width / 2),
-          y: isCorner ? Math.round(tpl.height / 2) : Math.round(tpl.height * 0.75),
-          size: isCorner ? Math.round(tpl.width * 0.9) : isDivider ? 500 : isRibbon ? 280 : 190,
-          color: variant === 'silver-seal' ? '#94a3b8' : variant === 'bronze-seal' ? '#ea580c' : '#c8a24a',
-          secondaryColor: variant === 'silver-seal' ? '#475569' : variant === 'bronze-seal' ? '#9a3412' : '#996515',
-          text: isWreath ? 'HONOR' : isRibbon ? 'OFFICIAL' : 'EXCELLENCE',
-          subtext: variant === 'gold-seal' ? 'MERIT' : '',
-          opacity: 1,
-        },
-      ],
-      layers: c.layers ? [newRef, ...c.layers] : undefined, // badges usually look good behind text
-    }));
-    setSelected(newRef);
-    setBadgeMenuOpen(false);
-    setSidebarTab('properties');
-  };
-
   const addSignatory = () => {
     recordHistory();
     const id = uid();
@@ -882,7 +840,6 @@ export default function TemplateDesigner({ ctx }) {
     let list = Array.isArray(cfg.layers) && cfg.layers.length > 0 ? [...cfg.layers] : null;
     if (!list) {
       list = [
-        ...(cfg.badges || []).map((b) => `badge:${b.id}`),
         ...(cfg.images || []).map((i) => `image:${i.id}`),
         ...(cfg.fields || []).map((f) => `field:${f.id}`),
         ...(cfg.signatories || []).map((s) => `sig:${s.id}`),
@@ -1153,10 +1110,6 @@ export default function TemplateDesigner({ ctx }) {
     if (t === 'qr') return 'Verification QR Code';
     if (t === 'field') return (it.text || '(empty text)').replace(/\s+/g, ' ').slice(0, 24);
     if (t === 'sig') return `Signature: ${it.name || 'Signatory'}`;
-    if (t === 'badge') {
-      const found = BADGE_VARIANTS.find((b) => b.id === it.variant);
-      return found?.name || 'Badge';
-    }
     if (t === 'image') return it.label || 'Logo / Graphic';
     return ref;
   };
@@ -1456,40 +1409,6 @@ export default function TemplateDesigner({ ctx }) {
               Text
             </button>
 
-            {/* Badges / Foil Seals Dropdown */}
-            <div className="relative">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setBadgeMenuOpen(!badgeMenuOpen)}
-                title="Add vector badge, foil seal, or ornament"
-              >
-                <Award className="h-3.5 w-3.5 text-amber-600" />
-                Badge / Seal
-                <ChevronDown className="h-3 w-3 text-slate-400" />
-              </button>
-
-              {badgeMenuOpen && (
-                <div className="absolute left-0 top-full z-40 mt-1 w-60 rounded-xl border border-line bg-white p-1.5 shadow-xl">
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Vector Seals & Accents
-                  </div>
-                  {BADGE_VARIANTS.map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => addBadge(b.id)}
-                      className="flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-mist"
-                    >
-                      <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold">{b.name}</p>
-                        <p className="text-[10px] text-slate-400 line-clamp-1">{b.description}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Logo Buttons: Global Store or Local Upload */}
             <div className="inline-flex rounded-lg border border-line bg-white shadow-xs">
               <button
@@ -1725,87 +1644,7 @@ export default function TemplateDesigner({ ctx }) {
               </>
             )}
 
-            {/* 2. BADGE & FOIL SEAL PROPERTIES */}
-            {item && selType === 'badge' && (
-              <>
-                <Field label="Badge / Seal Style">
-                  <select
-                    className="input text-xs"
-                    value={item.variant}
-                    onChange={(e) => patch(selected, { variant: e.target.value }, true)}
-                  >
-                    {BADGE_VARIANTS.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Primary Color">
-                    <input
-                      type="color"
-                      className="h-[34px] w-full cursor-pointer rounded-lg border border-line"
-                      value={item.color || '#c8a24a'}
-                      onChange={(e) => patch(selected, { color: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Accent Color">
-                    <input
-                      type="color"
-                      className="h-[34px] w-full cursor-pointer rounded-lg border border-line"
-                      value={item.secondaryColor || '#996515'}
-                      onChange={(e) => patch(selected, { secondaryColor: e.target.value })}
-                    />
-                  </Field>
-                </div>
-
-                {item.variant !== 'divider-flourish' && item.variant !== 'corner-flourish' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Field label="Center / Banner Text">
-                      <input
-                        className="input !py-1 text-xs"
-                        value={item.text || ''}
-                        placeholder="e.g. WINNER"
-                        onChange={(e) => patch(selected, { text: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="Subtext / Tag">
-                      <input
-                        className="input !py-1 text-xs"
-                        value={item.subtext || ''}
-                        placeholder="e.g. 1ST PLACE"
-                        onChange={(e) => patch(selected, { subtext: e.target.value })}
-                      />
-                    </Field>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Num label="Dimension (size)" value={item.size} min={40} max={1600} onChange={(v) => patch(selected, { size: v })} />
-                  <label className="block">
-                    <span className="label text-[11px]">Opacity ({Math.round((item.opacity ?? 1) * 100)}%)</span>
-                    <input
-                      type="range"
-                      min="0.05"
-                      max="1"
-                      step="0.05"
-                      className="w-full mt-2"
-                      value={item.opacity ?? 1}
-                      onChange={(e) => patch(selected, { opacity: Number(e.target.value) })}
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Num label="Center X" value={item.x} onChange={(v) => patch(selected, { x: v })} />
-                  <Num label="Center Y" value={item.y} onChange={(v) => patch(selected, { y: v })} />
-                </div>
-              </>
-            )}
-
-            {/* 3. QR CODE PROPERTIES */}
+            {/* 2. QR CODE PROPERTIES */}
             {item && selType === 'qr' && (
               <>
                 <p className="text-xs text-slate-500">The verification QR code directs scanners to this certificate’s verification page.</p>
@@ -1915,7 +1754,7 @@ export default function TemplateDesigner({ ctx }) {
             )}
 
             {/* DYNAMIC CONDITIONAL LOGIC BUILDER */}
-            {item && (selType === 'field' || selType === 'badge') && (
+            {item && selType === 'field' && (
               <div className="mt-3 rounded-xl border border-line bg-slate-50/70 p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800">Dynamic Conditional Display</span>
@@ -1932,7 +1771,7 @@ export default function TemplateDesigner({ ctx }) {
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Only show this {selType} for participants meeting specific criteria (e.g. Winner, Honors, Speaker).
+                  Only show this text for participants meeting specific criteria (e.g. Winner, Honors, Speaker).
                 </p>
 
                 {item.condition && (
@@ -2016,7 +1855,6 @@ export default function TemplateDesigner({ ctx }) {
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
                       {t === 'field' && <Type className="h-3.5 w-3.5 shrink-0 text-sky-600" />}
-                      {t === 'badge' && <Award className="h-3.5 w-3.5 shrink-0 text-amber-600" />}
                       {t === 'sig' && <PenLine className="h-3.5 w-3.5 shrink-0 text-emerald-600" />}
                       {t === 'image' && <ImageIcon className="h-3.5 w-3.5 shrink-0 text-purple-600" />}
                       {t === 'qr' && <QrCode className="h-3.5 w-3.5 shrink-0 text-slate-600" />}
