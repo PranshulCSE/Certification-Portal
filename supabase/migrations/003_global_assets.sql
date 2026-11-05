@@ -36,24 +36,28 @@ drop policy if exists "global_assets_public_select" on public.global_assets;
 create policy "global_assets_public_select" on public.global_assets
   for select to anon using (true);
 
--- Admins can insert, update, and delete global assets
+-- Admins and authenticated users can insert, update, and delete global assets
 drop policy if exists "global_assets_insert" on public.global_assets;
 create policy "global_assets_insert" on public.global_assets
   for insert to authenticated
-  with check (public.is_admin());
+  with check (true);
 
 drop policy if exists "global_assets_update" on public.global_assets;
 create policy "global_assets_update" on public.global_assets
   for update to authenticated
-  using (public.is_admin())
-  with check (public.is_admin());
+  using (true)
+  with check (true);
 
 drop policy if exists "global_assets_delete" on public.global_assets;
 create policy "global_assets_delete" on public.global_assets
   for delete to authenticated
-  using (public.is_admin());
+  using (true);
 
 -- Ensure storage policies on 'event-assets' allow global/ path
--- (Already covered by public bucket policies in 002, but repeated here for safety)
+-- (Already covered by public bucket policies in 002/004, but repeated here for safety)
 insert into storage.buckets (id, name, public) values ('event-assets', 'event-assets', true)
   on conflict (id) do update set public = true;
+
+drop policy if exists "assets delete" on storage.objects;
+create policy "assets delete" on storage.objects for delete to public
+  using (bucket_id = 'event-assets');
