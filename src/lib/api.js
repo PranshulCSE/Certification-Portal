@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { evictAssetCache } from './render';
 
 export async function rpc(name, args = {}) {
   const { data, error } = await supabase.rpc(name, args);
@@ -117,13 +118,67 @@ export async function fetchGlobalAssets(category = null) {
 }
 
 export async function deleteGlobalAsset(id, path) {
-  if (path) {
-    await supabase.storage.from('event-assets').remove([path]).catch(() => {});
+  const cleanPath = path ? String(path).replace(/^\/+/, '') : null;
+
+  // 1. Evict from memory image cache immediately
+  if (path) evictAssetCache(path);
+  if (cleanPath) evictAssetCache(cleanPath);
+
+  // 2. Remove file from Supabase storage
+  if (cleanPath || path) {
+    try {
+      const targets = [cleanPath, path].filter(Boolean);
+      await supabase.storage.from('event-assets').remove(targets);
+    } catch (storageErr) {
+      console.warn('Storage removal warning:', storageErr);
+    }
   }
+
+  // 3. Check if record exists in global_assets table
+  let rowExists = false;
   if (id) {
-    const { error } = await supabase.from('global_assets').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    const { data } = await supabase.from('global_assets').select('id').eq('id', id).maybeSingle();
+    if (data) rowExists = true;
+  } else if (cleanPath) {
+    const { data } = await supabase
+      .from('global_assets')
+      .select('id')
+      .or(`path.eq.${cleanPath},path.eq.${path}`)
+      .maybeSingle();
+    if (data) rowExists = true;
   }
+
+  // If already not in database, we are done
+  if (!rowExists) {
+    return true;
+  }
+
+  // 4. Delete row from global_assets table and verify with select()
+  let rowsDeleted = 0;
+  if (id) {
+    const { data, error } = await supabase.from('global_assets').delete().eq('id', id).select();
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) rowsDeleted += data.length;
+  }
+
+  if (rowsDeleted === 0 && cleanPath) {
+    const { data, error } = await supabase
+      .from('global_assets')
+      .delete()
+      .or(`path.eq.${cleanPath},path.eq.${path}`)
+      .select();
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) rowsDeleted += data.length;
+  }
+
+  // If the record exists in DB but 0 rows were deleted, RLS policy blocked the deletion
+  if (rowsDeleted === 0) {
+    throw new Error(
+      'Database permission denied: Supabase Row-Level Security (RLS) blocked the deletion of this asset. Please run migration 004 in your Supabase SQL Editor to allow deleting assets.'
+    );
+  }
+
+  return true;
 }
 
 // Supabase returns at most 1000 rows per request; this pages through all of them.

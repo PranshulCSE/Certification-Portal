@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertCircle,
   Check,
   ExternalLink,
   Image as ImageIcon,
@@ -7,11 +8,12 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   UploadCloud,
   X,
   Database,
 } from 'lucide-react';
-import { assetUrl, fetchGlobalAssets, uploadGlobalAsset } from '../lib/api';
+import { assetUrl, deleteGlobalAsset, fetchGlobalAssets, uploadGlobalAsset } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Field, Spinner, useToast } from './ui';
 
@@ -38,6 +40,8 @@ export default function GlobalAssetPickerModal({
   const [uploadSigner, setUploadSigner] = useState('');
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [failedImageIds, setFailedImageIds] = useState(new Set());
 
   useEffect(() => {
     if (open) {
@@ -56,6 +60,23 @@ export default function GlobalAssetPickerModal({
       console.warn('Global assets fetch error:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteAsset = async (e, asset) => {
+    e.stopPropagation();
+    try {
+      await deleteGlobalAsset(asset.id, asset.path);
+      toast.ok('Asset removed from Global Store');
+      setDeleteConfirmId(null);
+      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      setFailedImageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
+    } catch (err) {
+      toast.error(`Delete failed: ${err.message}`);
     }
   };
 
@@ -289,13 +310,53 @@ export default function GlobalAssetPickerModal({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {filteredAssets.map((asset) => {
                     const url = assetUrl(asset.path);
+                    const isDeleting = deleteConfirmId === asset.id;
+                    const isMissing = failedImageIds.has(asset.id);
                     return (
-                      <button
+                      <div
                         key={asset.id}
-                        type="button"
+                        className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-white text-left transition hover:border-amber-500 hover:shadow-md cursor-pointer"
                         onClick={() => onSelect(asset)}
-                        className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-white text-left transition hover:border-amber-500 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-500"
                       >
+                        {/* Delete button for admins */}
+                        {isAdmin && (
+                          <div className="absolute right-2 top-2 z-10" onClick={(e) => e.stopPropagation()}>
+                            {isDeleting ? (
+                              <div className="flex items-center gap-1 rounded bg-white/95 p-0.5 shadow-md border border-rose-300">
+                                <button
+                                  type="button"
+                                  className="px-1.5 py-0.5 text-[10px] font-bold text-white bg-rose-600 rounded hover:bg-rose-700"
+                                  onClick={(e) => handleDeleteAsset(e, asset)}
+                                >
+                                  Del
+                                </button>
+                                <button
+                                  type="button"
+                                  className="px-1 py-0.5 text-[10px] text-slate-500 hover:text-ink"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirmId(null);
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="p-1 rounded-md bg-white/90 text-slate-400 hover:bg-rose-50 hover:text-rose-600 shadow-sm border border-line/80 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmId(asset.id);
+                                }}
+                                title="Delete from Global Store"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                         <div
                           className="flex h-28 w-full items-center justify-center border-b border-line/60 p-3"
                           style={{
@@ -306,12 +367,22 @@ export default function GlobalAssetPickerModal({
                             backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0px',
                           }}
                         >
-                          <img
-                            src={url}
-                            alt={asset.name}
-                            className="max-h-full max-w-full object-contain transition duration-150 group-hover:scale-105"
-                            loading="lazy"
-                          />
+                          {isMissing ? (
+                            <div className="flex flex-col items-center justify-center p-1 text-center">
+                              <AlertCircle className="h-6 w-6 text-amber-500 mb-0.5" />
+                              <span className="text-[10px] font-semibold text-amber-700">Missing File</span>
+                            </div>
+                          ) : (
+                            <img
+                              src={url}
+                              alt={asset.name}
+                              className="max-h-full max-w-full object-contain transition duration-150 group-hover:scale-105"
+                              loading="lazy"
+                              onError={() => {
+                                setFailedImageIds((prev) => new Set(prev).add(asset.id));
+                              }}
+                            />
+                          )}
                           <span
                             className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                               asset.category === 'logo' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
@@ -333,7 +404,7 @@ export default function GlobalAssetPickerModal({
                             {asset.width && asset.height ? `${asset.width}×${asset.height}px` : ''}
                           </p>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
