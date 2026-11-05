@@ -1712,10 +1712,43 @@ export default function TemplateDesigner({ ctx }) {
                     </button>
                     {item.path && (
                       <button className="btn btn-ghost btn-sm text-xs text-rose-600" onClick={() => patch(selected, { path: null }, true)}>
-                        Clear
+                        Clear Artwork
                       </button>
                     )}
                   </div>
+
+                  {item.path && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-line bg-mist/40 p-2">
+                      <div className="flex h-10 w-16 items-center justify-center rounded border border-line bg-white p-1 overflow-hidden shrink-0">
+                        <img
+                          src={assets?.images?.[item.path]?.src || assetUrl(item.path)}
+                          alt="Signature Artwork"
+                          className="max-h-full max-w-full object-contain"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className="text-[11px] font-medium text-ink truncate" title={item.path}>
+                          {item.path.split('/').pop()}
+                        </p>
+                        {assets?.failedPaths?.includes(item.path) ? (
+                          <p className="text-[10px] font-semibold text-rose-600">File not found in store</p>
+                        ) : (
+                          <p className="text-[10px] text-slate-500">Artwork attached</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs text-rose-600 hover:bg-rose-50 p-1"
+                        onClick={() => patch(selected, { path: null }, true)}
+                        title="Remove signature artwork"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                   <input
                     ref={sigInput}
                     type="file"

@@ -15,6 +15,23 @@ export function cacheAssetImage(path, img) {
   imageCache.set(path, p);
   const url = assetUrl(cleanPath);
   if (url) imageCache.set(url, p);
+  const rawUrl = assetUrl(path);
+  if (rawUrl) imageCache.set(rawUrl, p);
+}
+
+export function evictAssetCache(path) {
+  if (!path) return;
+  const cleanPath = String(path).replace(/^\/+/, '');
+  imageCache.delete(cleanPath);
+  imageCache.delete(path);
+  const url = assetUrl(cleanPath);
+  if (url) imageCache.delete(url);
+  const rawUrl = assetUrl(path);
+  if (rawUrl) imageCache.delete(rawUrl);
+}
+
+export function clearAssetCache() {
+  imageCache.clear();
 }
 
 export function loadImage(src) {

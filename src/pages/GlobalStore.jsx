@@ -40,6 +40,38 @@ export default function GlobalStore() {
   const [signerTitle, setSignerTitle] = useState('');
   const [uploading, setUploading] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [rlsErrorNotice, setRlsErrorNotice] = useState(false);
+  const [failedImageIds, setFailedImageIds] = useState(new Set());
+
+  const FIX_SQL = `-- Run this in your Supabase Dashboard -> SQL Editor to fix Global Store Delete & Storage
+alter table public.global_assets enable row level security;
+
+drop policy if exists "global_assets_delete" on public.global_assets;
+create policy "global_assets_delete" on public.global_assets
+  for delete to authenticated using (true);
+
+drop policy if exists "global_assets_insert" on public.global_assets;
+create policy "global_assets_insert" on public.global_assets
+  for insert to authenticated with check (true);
+
+drop policy if exists "global_assets_update" on public.global_assets;
+create policy "global_assets_update" on public.global_assets
+  for update to authenticated using (true) with check (true);
+
+drop policy if exists "global_assets_select" on public.global_assets;
+create policy "global_assets_select" on public.global_assets
+  for select to authenticated using (true);
+
+drop policy if exists "global_assets_public_select" on public.global_assets;
+create policy "global_assets_public_select" on public.global_assets
+  for select to anon using (true);
+
+insert into storage.buckets (id, name, public) values ('event-assets', 'event-assets', true)
+  on conflict (id) do update set public = true;
+
+drop policy if exists "assets delete" on storage.objects;
+create policy "assets delete" on storage.objects for delete to public
+  using (bucket_id = 'event-assets');`;
 
   const loadAssets = useCallback(async () => {
     setLoading(true);
@@ -115,7 +147,15 @@ export default function GlobalStore() {
       toast.ok('Asset removed from Global Store.');
       setDeleteConfirmId(null);
       setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      setFailedImageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
     } catch (err) {
+      if (err.message?.includes('Row-Level Security') || err.message?.includes('permission') || err.message?.includes('RLS')) {
+        setRlsErrorNotice(true);
+      }
       toast.error(`Failed to delete: ${err.message}`);
     }
   };
@@ -186,7 +226,7 @@ export default function GlobalStore() {
               <h3 className="font-semibold text-amber-950">Database Setup Required for Global Store</h3>
               <p className="text-sm">
                 The <code>global_assets</code> table does not exist in your Supabase database yet. Run the migration script in{' '}
-                <code>supabase/migrations/003_global_assets.sql</code> inside your Supabase Dashboard SQL Editor to enable shared assets.
+                <code>supabase/migrations/004_fix_global_assets_delete.sql</code> inside your Supabase Dashboard SQL Editor to enable shared assets.
               </p>
               <div className="flex gap-2">
                 <button
@@ -206,12 +246,7 @@ export default function GlobalStore() {
   created_at timestamptz not null default now()
 );
 
-alter table public.global_assets enable row level security;
-create policy global_assets_select on public.global_assets for select to authenticated using (true);
-create policy global_assets_public_select on public.global_assets for select to anon using (true);
-create policy global_assets_insert on public.global_assets for insert to authenticated with check (public.is_admin());
-create policy global_assets_update on public.global_assets for update to authenticated using (public.is_admin());
-create policy global_assets_delete on public.global_assets for delete to authenticated using (public.is_admin());`);
+${FIX_SQL}`);
                     toast.ok('SQL copied to clipboard!');
                   }}
                 >
@@ -220,6 +255,42 @@ create policy global_assets_delete on public.global_assets for delete to authent
                 </button>
                 <button className="btn btn-sm btn-ghost" onClick={loadAssets}>
                   Check Again
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RLS Policy Notice if delete failed */}
+      {rlsErrorNotice && (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 p-5 text-rose-900 shadow-sm animate-in fade-in">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-6 w-6 shrink-0 text-rose-600" />
+            <div className="space-y-2 flex-1">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-rose-950">Supabase RLS Policy Fix Required to Delete Assets</h3>
+                <button className="btn btn-ghost btn-xs text-rose-700" onClick={() => setRlsErrorNotice(false)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="text-sm">
+                Supabase database rejected the deletion because of restrictive Row-Level Security (RLS) policies.
+                Copy and run the SQL below in your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to fix delete and storage permissions:
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button
+                  className="btn btn-sm border-rose-400 bg-white text-rose-900 hover:bg-rose-100 flex items-center gap-1.5"
+                  onClick={() => {
+                    navigator.clipboard.writeText(FIX_SQL);
+                    toast.ok('Fix SQL copied to clipboard! Paste it into Supabase SQL Editor.');
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy RLS Fix SQL
+                </button>
+                <button className="btn btn-sm btn-ghost" onClick={() => setRlsErrorNotice(false)}>
+                  Dismiss
                 </button>
               </div>
             </div>
@@ -311,12 +382,23 @@ create policy global_assets_delete on public.global_assets for delete to authent
                     backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
                   }}
                 >
-                  <img
-                    src={url}
-                    alt={asset.name}
-                    className="max-h-full max-w-full object-contain transition duration-200 group-hover:scale-105"
-                    loading="lazy"
-                  />
+                  {failedImageIds.has(asset.id) ? (
+                    <div className="flex flex-col items-center justify-center p-2 text-center">
+                      <AlertCircle className="h-8 w-8 text-amber-500 mb-1" />
+                      <span className="text-[11px] font-semibold text-amber-700">File Missing in Storage</span>
+                      <span className="text-[10px] text-slate-400">Removed from bucket</span>
+                    </div>
+                  ) : (
+                    <img
+                      src={url}
+                      alt={asset.name}
+                      className="max-h-full max-w-full object-contain transition duration-200 group-hover:scale-105"
+                      loading="lazy"
+                      onError={() => {
+                        setFailedImageIds((prev) => new Set(prev).add(asset.id));
+                      }}
+                    />
+                  )}
                   <span
                     className={`absolute left-2.5 top-2.5 rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase ${
                       asset.category === 'logo' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
