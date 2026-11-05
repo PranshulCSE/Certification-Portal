@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { evictAssetCache } from './render';
+import { evictAssetCache } from './cache';
 
 export async function rpc(name, args = {}) {
   const { data, error } = await supabase.rpc(name, args);

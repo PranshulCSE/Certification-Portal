@@ -3,10 +3,12 @@ import { jsPDF } from 'jspdf';
 import { supabase } from './supabase';
 import { assetUrl } from './api';
 import { fillTemplate } from './format';
+import { imageCache, evictAssetCache as baseEvict, clearAssetCache } from './cache';
+
+// Re-export cache helpers so existing imports continue to work
+export { imageCache, clearAssetCache };
 
 // ---------- image loading ----------
-export const imageCache = new Map();
-
 export function cacheAssetImage(path, img) {
   if (!path || !img) return;
   const p = Promise.resolve(img);
@@ -21,17 +23,12 @@ export function cacheAssetImage(path, img) {
 
 export function evictAssetCache(path) {
   if (!path) return;
+  baseEvict(path);
   const cleanPath = String(path).replace(/^\/+/, '');
-  imageCache.delete(cleanPath);
-  imageCache.delete(path);
   const url = assetUrl(cleanPath);
   if (url) imageCache.delete(url);
   const rawUrl = assetUrl(path);
   if (rawUrl) imageCache.delete(rawUrl);
-}
-
-export function clearAssetCache() {
-  imageCache.clear();
 }
 
 export function loadImage(src) {
