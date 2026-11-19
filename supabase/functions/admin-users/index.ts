@@ -12,7 +12,11 @@ function tempPassword(len = 14) {
 
 // deno-lint-ignore no-explicit-any
 async function emailCredentials(req: Request, to: string, name: string, password: string, reset: boolean) {
-  const site = (Deno.env.get("SITE_URL") || req.headers.get("origin") || "").replace(/\/+$/, "");
+  let site = (Deno.env.get("SITE_URL") || req.headers.get("origin") || "").replace(/\/+$/, "");
+  if (site && !/^https?:\/\//i.test(site)) {
+    const isLocal = site.startsWith("localhost") || site.startsWith("127.0.0.1");
+    site = `${isLocal ? "http" : "https"}://${site}`;
+  }
   const text = `Hello ${name},\n\n${reset ? "Your portal password was reset by the admin." : "You have been added as an issuer on the Certificate Portal."}\n\nLogin: ${site}/login\nEmail: ${to}\nTemporary password: ${password}\n\nYou will be asked to choose your own password at first login.\n`;
   await transporter().sendMail({ from: fromAddress(), to, subject: reset ? "Your Certificate Portal password was reset" : "Your Certificate Portal account", text, html: toHtml(text) });
 }
