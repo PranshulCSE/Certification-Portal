@@ -12,7 +12,11 @@ function tempPassword(len = 14) {
 
 async function emailCredentials(req, to, name, password, reset) {
   const origin = req.headers['origin'] || req.headers['referer'] || '';
-  const site = (process.env.SITE_URL || origin || '').replace(/\/+$/, '');
+  let site = (process.env.SITE_URL || origin || '').replace(/\/+$/, '');
+  if (site && !/^https?:\/\//i.test(site)) {
+    const isLocal = site.startsWith('localhost') || site.startsWith('127.0.0.1');
+    site = `${isLocal ? 'http' : 'https'}://${site}`;
+  }
   const text = `Hello ${name},\n\n${
     reset
       ? 'Your portal password was reset by the admin.'
