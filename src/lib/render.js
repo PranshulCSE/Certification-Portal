@@ -173,7 +173,8 @@ export function defaultBackground(w, h, style = 'gold-double') {
 }
 
 export async function makeQrImage(url) {
-  const dataUrl = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 600, color: { dark: '#000000', light: '#ffffff' } });
+  const cleanUrl = String(url || '').trim();
+  const dataUrl = await QRCode.toDataURL(cleanUrl, { errorCorrectionLevel: 'M', margin: 1, width: 600, color: { dark: '#000000', light: '#ffffff' } });
   return loadImage(dataUrl);
 }
 
