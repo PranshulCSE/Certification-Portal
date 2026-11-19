@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BadgeCheck, ShieldAlert, SearchX, Linkedin, Link2, Printer } from 'lucide-react';
 import { supabase, verifyUrl } from '../lib/supabase';
 import { formatDate } from '../lib/format';
@@ -34,7 +34,10 @@ function linkedinUrl(c) {
 }
 
 export default function Verify() {
-  const { code } = useParams();
+  const { code: pathCode } = useParams();
+  const [searchParams] = useSearchParams();
+  const queryCode = searchParams.get('credential') || searchParams.get('code') || searchParams.get('id');
+  const code = (pathCode || queryCode || '').trim();
   const navigate = useNavigate();
   const [input, setInput] = useState(code || '');
   const [state, setState] = useState({ loading: !!code, result: null, error: '' });
