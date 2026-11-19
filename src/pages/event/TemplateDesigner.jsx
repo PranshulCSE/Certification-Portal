@@ -1648,11 +1648,16 @@ export default function TemplateDesigner({ ctx }) {
             {item && selType === 'qr' && (
               <>
                 <p className="text-xs text-slate-500">The verification QR code directs scanners to this certificate’s verification page.</p>
+                <div className="rounded-md border border-line bg-mist/60 p-2 text-xs text-slate2">
+                  <span className="font-semibold text-slate-700">Target verification URL:</span>
+                  <p className="mt-0.5 break-all font-mono text-[11px] text-ink">{verifyUrl(SAMPLE_VALUES.code)}</p>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   <Num label="Size" value={item.size} min={50} max={600} onChange={(v) => patch('qr', { size: v })} />
                   <Num label="Center X" value={item.x} onChange={(v) => patch('qr', { x: v })} />
                   <Num label="Center Y" value={item.y} onChange={(v) => patch('qr', { y: v })} />
                 </div>
+                <p className="text-[11px] text-slate-400">Tip: If your background template already has a placeholder QR code printed on it, position and resize this QR box directly over it to cover it.</p>
               </>
             )}
 
