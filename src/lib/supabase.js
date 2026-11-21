@@ -5,43 +5,47 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const isConfigured = Boolean(url && key);
 export const supabase = isConfigured ? createClient(url, key) : null;
-
 const isLocalHost = (h) => !h || h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '::1';
 
+// Hosts copied from .env.example / README (e.g. your-portal.vercel.app). These are NOT this portal.
+const isPlaceholderHost = (h) =>
+  /^your[-_.]|[-_.]your[-_.]|your-portal|your-project|your-domain|yourdomain|^example\.(com|org|edu|net)$/i.test(h || '');
+
+const hostOf = (u) => String(u || '').replace(/^https?:\/\//i, '').split('/')[0].split(':')[0].toLowerCase();
+
+const normalizeUrl = (u) => {
+  let c = String(u || '').trim().replace(/\/+$/, '');
+  if (!c) return '';
+  if (!/^https?:\/\//i.test(c)) c = `https://${c}`;
+  return c;
+};
+
+const usableEnvUrl = () => {
+  const c = normalizeUrl(import.meta.env.VITE_PUBLIC_SITE_URL);
+  if (!c) return '';
+  const h = hostOf(c);
+  return isLocalHost(h) || isPlaceholderHost(h) ? '' : c;
+};
+
 export const siteUrl = () => {
-  // If running in browser:
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin.replace(/\/+$/, '');
-    const hostname = window.location.hostname || '';
-    const isLocal = isLocalHost(hostname);
-
-    // If running on a live deployed site (e.g. Vercel, university domain),
-    // ALWAYS use the current origin so stale environment variables from cloned repos cannot hijack the QR code.
-    if (!isLocal) {
-      return origin;
-    }
-
-    // In local development, if VITE_PUBLIC_SITE_URL is explicitly set to a public remote URL (e.g. ngrok tunnel), use it.
-    const envUrl = (import.meta.env.VITE_PUBLIC_SITE_URL || '').trim();
-    if (envUrl) {
-      const envHost = envUrl.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
-      if (!isLocalHost(envHost)) {
-        let clean = envUrl.replace(/\/+$/, '');
-        if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
-        return clean;
-      }
-    }
-
-    return origin;
+    if (!isLocalHost(window.location.hostname || '')) return origin;
+    return usableEnvUrl() || origin;
   }
+  return usableEnvUrl();
+};
 
-  // Fallback for non-browser environments:
-  let envUrl = (import.meta.env.VITE_PUBLIC_SITE_URL || '').trim().replace(/\/+$/, '');
-  if (envUrl && !/^https?:\/\//i.test(envUrl)) {
-    const host = envUrl.replace(/\/.*$/, '').split(':')[0];
-    envUrl = `${isLocalHost(host) ? 'http' : 'https'}://${envUrl}`;
+export const qrSiteProblem = () => {
+  const u = siteUrl();
+  const h = hostOf(u);
+  if (!u || isLocalHost(h)) {
+    return 'Certificates generated from localhost will get a QR code that nobody can open. Generate them from your deployed site, or set VITE_PUBLIC_SITE_URL to your real public URL and restart.';
   }
-  return envUrl || '';
+  if (isPlaceholderHost(h)) {
+    return `The site URL (${u}) is a placeholder, not your portal. Fix VITE_PUBLIC_SITE_URL / SITE_URL.`;
+  }
+  return '';
 };
 
 export const verifyUrl = (code) => `${siteUrl()}/verify/${encodeURIComponent(code || '')}`;
